@@ -1,0 +1,541 @@
+/* Mobile-Friendly CSS for Habit Tracker */
+/* Add this CSS file to your project and import it in your main component */
+
+/* Base responsive settings */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Mobile-first approach - styles for mobile, then desktop overrides */
+
+/* Navigation improvements */
+.habit-tracker-nav {
+  padding: 0 1rem;
+}
+
+@media (min-width: 640px) {
+  .habit-tracker-nav {
+    padding: 0 1.5rem;
+  }
+}
+
+/* Make navigation buttons stack on mobile */
+.nav-buttons {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  .nav-buttons button {
+    min-width: auto;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    white-space: nowrap;
+  }
+  
+  .nav-buttons button span {
+    display: none;
+  }
+  
+  /* Show only emojis on mobile */
+  .nav-buttons button::before {
+    content: attr(data-emoji);
+    font-size: 1.25rem;
+  }
+}
+
+/* Habit tracker grid - horizontal scroll on mobile */
+.habits-grid {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+  min-width: 100%;
+}
+
+.habits-table {
+  min-width: 800px; /* Minimum width to maintain usability */
+}
+
+@media (max-width: 768px) {
+  .habits-table {
+    min-width: 600px;
+  }
+  
+  .habits-table th,
+  .habits-table td {
+    padding: 0.5rem 0.25rem;
+    font-size: 0.875rem;
+  }
+  
+  .habits-table input[type="number"] {
+    width: 2.5rem;
+    height: 2rem;
+    font-size: 0.75rem;
+  }
+  
+  .habits-table button {
+    width: 1.75rem;
+    height: 1.75rem;
+    font-size: 0.75rem;
+  }
+}
+
+/* Mobile habit cards - stack habits vertically on very small screens */
+@media (max-width: 480px) {
+  .habits-mobile-cards {
+    display: block;
+  }
+  
+  .habits-grid {
+    display: none;
+  }
+  
+  .habit-card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  
+  .habit-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: between;
+    margin-bottom: 0.75rem;
+  }
+  
+  .habit-card-name {
+    font-weight: 600;
+    color: #374151;
+  }
+  
+  .habit-card-progress {
+    font-size: 0.875rem;
+    color: #6b7280;
+  }
+  
+  .habit-week-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+  
+  .habit-day {
+    text-align: center;
+  }
+  
+  .habit-day-label {
+    font-size: 0.75rem;
+    color: #6b7280;
+    margin-bottom: 0.25rem;
+  }
+  
+  .habit-day-input {
+    width: 100%;
+    height: 2rem;
+    text-align: center;
+    font-size: 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.25rem;
+  }
+  
+  .habit-day-button {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    border: 2px solid #d1d5db;
+    background: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    margin: 0 auto;
+  }
+  
+  .habit-day-button.completed {
+    background: #10b981;
+    border-color: #10b981;
+    color: white;
+  }
+}
+
+/* Week navigation - make more compact on mobile */
+.week-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  padding: 0 1rem;
+}
+
+@media (max-width: 640px) {
+  .week-navigation {
+    margin-bottom: 1rem;
+    padding: 0 0.5rem;
+  }
+  
+  .week-navigation button {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+  }
+  
+  .week-navigation .week-title {
+    font-size: 1.125rem;
+    text-align: center;
+  }
+}
+
+/* Score card - stack on mobile */
+.score-card {
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  color: white;
+  border-radius: 0.5rem;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  .score-card {
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  
+  .score-card-content {
+    flex-direction: column !important;
+    text-align: center;
+  }
+  
+  .score-card-main {
+    margin-bottom: 1rem;
+  }
+  
+  .score-card-stats {
+    text-align: center !important;
+  }
+}
+
+/* Daily breakdown - smaller on mobile */
+.daily-breakdown {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+@media (max-width: 640px) {
+  .daily-breakdown {
+    gap: 0.25rem;
+  }
+  
+  .daily-breakdown-item {
+    padding: 0.5rem 0.25rem !important;
+    font-size: 0.875rem;
+  }
+  
+  .daily-breakdown-score {
+    font-size: 1rem !important;
+  }
+}
+
+/* Leaderboard - stack cards on mobile */
+.leaderboard-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .leaderboard-grid {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    padding: 1rem;
+  }
+  
+  .leaderboard-item {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+  }
+  
+  .leaderboard-mobile {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  
+  .leaderboard-rank {
+    font-size: 1.5rem;
+    font-weight: bold;
+  }
+  
+  .leaderboard-user {
+    flex: 1;
+    margin: 0 1rem;
+  }
+  
+  .leaderboard-stats {
+    text-align: right;
+  }
+  
+  .leaderboard-desktop {
+    display: none;
+  }
+}
+
+@media (min-width: 769px) {
+  .leaderboard-mobile {
+    display: none;
+  }
+}
+
+/* Quick stats - responsive grid */
+.quick-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  .quick-stats {
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  
+  .quick-stat-card {
+    padding: 0.75rem !important;
+  }
+  
+  .quick-stat-icon {
+    font-size: 1.5rem !important;
+    margin-bottom: 0.5rem;
+  }
+  
+  .quick-stat-number {
+    font-size: 1.25rem !important;
+  }
+  
+  .quick-stat-label {
+    font-size: 0.75rem !important;
+  }
+}
+
+/* Modal improvements for mobile */
+.modal-overlay {
+  padding: 1rem;
+}
+
+@media (max-width: 640px) {
+  .modal-overlay {
+    padding: 0.5rem;
+  }
+  
+  .modal-content {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: 90vh !important;
+    overflow-y: auto !important;
+  }
+  
+  .modal-header {
+    padding: 1rem !important;
+    position: sticky;
+    top: 0;
+    background: white;
+    border-bottom: 1px solid #e5e7eb;
+    z-index: 10;
+  }
+}
+
+/* Form improvements */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+}
+
+/* Icon grid for custom habits */
+.icon-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 0.5rem;
+}
+
+@media (max-width: 640px) {
+  .icon-grid {
+    grid-template-columns: repeat(8, 1fr);
+    gap: 0.25rem;
+  }
+  
+  .icon-button {
+    padding: 0.5rem !important;
+    font-size: 1rem !important;
+  }
+}
+
+/* Summary cards - responsive grid */
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
+  
+  .summary-card {
+    padding: 0.75rem !important;
+  }
+  
+  .summary-card-icon {
+    font-size: 1.25rem !important;
+  }
+  
+  .summary-card-name {
+    font-size: 0.75rem !important;
+  }
+  
+  .summary-card-value {
+    font-size: 1rem !important;
+  }
+}
+
+/* Touch improvements */
+@media (hover: none) {
+  .hover\:bg-gray-50:hover {
+    background-color: transparent;
+  }
+  
+  .hover\:bg-blue-50:hover {
+    background-color: transparent;
+  }
+  
+  /* Make buttons more touch-friendly */
+  button, .button, input[type="submit"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Increase touch target for small inputs */
+  input[type="number"], input[type="checkbox"] {
+    min-height: 36px;
+    min-width: 36px;
+  }
+}
+
+/* Accessibility improvements */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Dark mode support (optional) */
+@media (prefers-color-scheme: dark) {
+  .dark-mode-support {
+    background-color: #1f2937;
+    color: #f9fafb;
+  }
+  
+  .dark-mode-support .bg-white {
+    background-color: #374151;
+  }
+  
+  .dark-mode-support .text-gray-800 {
+    color: #f9fafb;
+  }
+  
+  .dark-mode-support .text-gray-600 {
+    color: #d1d5db;
+  }
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  .habits-table {
+    min-width: auto !important;
+  }
+  
+  .score-card {
+    background: white !important;
+    color: black !important;
+    border: 1px solid #000 !important;
+  }
+}
+
+/* Utility classes for mobile */
+.mobile-only {
+  display: none;
+}
+
+.desktop-only {
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .mobile-only {
+    display: block;
+  }
+  
+  .desktop-only {
+    display: none;
+  }
+}
+
+/* Safe area insets for iOS */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

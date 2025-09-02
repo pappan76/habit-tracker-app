@@ -1,47 +1,45 @@
-import { useState, useEffect } from 'react';
-import { 
-  signInWithPopup, 
-  signOut, 
-  onAuthStateChanged 
-} from 'firebase/auth';
-import { auth, googleProvider } from '../services/firebase';
+// src/hooks/useAuth.js
+import { useEffect } from "react";
+import { auth } from "../firebase"; // your firebase config
+import {
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+} from "firebase/auth";
 
-export const useAuth = () => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+const provider = new GoogleAuthProvider();
 
+export function useAuth() {
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoading(false);
-    });
-
-    return unsubscribe;
+    // Handle redirect result (mobile login)
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          console.log("Logged in with redirect:", result.user);
+        }
+      })
+      .catch((error) => {
+        console.error("Redirect login error:", error);
+      });
   }, []);
 
   const signInWithGoogle = async () => {
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      return result.user;
+      if (isMobile) {
+        // Mobile → use redirect
+        await signInWithRedirect(auth, provider);
+      } else {
+        // Desktop → use popup
+        const result = await signInWithPopup(auth, provider);
+        console.log("Logged in with popup:", result.user);
+      }
     } catch (error) {
-      console.error('Error signing in with Google:', error);
-      throw error;
+      console.error("Google sign-in error:", error);
     }
   };
 
-  const logout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error('Error signing out:', error);
-      throw error;
-    }
-  };
-
-  return {
-    user,
-    loading,
-    signInWithGoogle,
-    logout
-  };
-};
+  return { signInWithGoogle };
+}

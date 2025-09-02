@@ -3,6 +3,7 @@ import { useAuth } from './hooks/useAuth';
 import Login from './components/Login';
 import HabitList from './components/HabitList';
 import './App.css';
+import './styles/mobile.css';
 
 function App() {
   const { user, loading } = useAuth();
