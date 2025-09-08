@@ -7,6 +7,7 @@ const Login = () => {
   const handleGoogleSignIn = async () => {
     try {
       await signInWithGoogle();
+      saveUserToFirestore();
     } catch (error) {
       console.error('Failed to sign in:', error);
     }

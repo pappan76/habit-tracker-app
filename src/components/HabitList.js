@@ -9,6 +9,7 @@ import {
   getHabitLogs 
 } from '../services/habitsService';
 import { format, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns';
+import { updateHabitNames } from '../utils/updateHabits';
 
 const HabitList = () => {
   const { user, logout } = useAuth();

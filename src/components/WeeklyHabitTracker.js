@@ -14,6 +14,39 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth, db } from '../services/firebase';
 import CustomHabitsModal from './CustomHabitsModal';
 
+const getLeadershipGoalProgress = (habit, habitValues) => {
+  if (habit.name !== 'Process Appointments') return null;
+  
+  const goalStart = new Date('2024-09-01');
+  const goalEnd = new Date('2024-12-01');
+  const goalTarget = 75;
+  
+  // Calculate total appointments from Sept 1 to Dec 1
+  let totalAppointments = 0;
+  const currentDate = new Date();
+  const endDate = currentDate < goalEnd ? currentDate : goalEnd;
+  
+  // Loop through all dates from Sept 1 to current date (or goal end)
+  for (let date = new Date(goalStart); date <= endDate; date.setDate(date.getDate() + 1)) {
+    const dateString = formatDateString(date);
+    const key = `${habit.id}-${dateString}`;
+    totalAppointments += habitValues[key] || 0;
+  }
+  
+  const remaining = Math.max(0, goalTarget - totalAppointments);
+  const daysRemaining = Math.max(0, Math.ceil((goalEnd - currentDate) / (1000 * 60 * 60 * 24)));
+  const progress = (totalAppointments / goalTarget) * 100;
+  
+  return {
+    total: totalAppointments,
+    target: goalTarget,
+    remaining,
+    daysRemaining,
+    progress: Math.min(100, progress),
+    isActive: currentDate >= goalStart && currentDate <= goalEnd
+  };
+};
+
 const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
   const [user] = useAuthState(auth);
   const [currentWeek, setCurrentWeek] = useState(new Date());
@@ -60,48 +93,69 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
   }, [user, habits, currentWeek]);
 
   const loadWeeklyProgress = async () => {
-    setLoading(true);
-    try {
-      const weekStart = weekDates[0];
-      const weekEnd = weekDates[6];
+  setLoading(true);
+  try {
+    const weekStart = weekDates[0];
+    const weekEnd = weekDates[6];
+    
+    const habitProgress = {};
+    const habitNumberValues = {};
+    
+    for (const habit of habits) {
+      const habitRef = doc(db, 'habits', habit.id);
+      const habitDoc = await getDocs(query(collection(db, 'habits'), where('__name__', '==', habit.id)));
       
-      const habitProgress = {};
-      const habitNumberValues = {};
-      
-      for (const habit of habits) {
-        const habitRef = doc(db, 'habits', habit.id);
-        const habitDoc = await getDocs(query(collection(db, 'habits'), where('__name__', '==', habit.id)));
+      if (!habitDoc.empty) {
+        const habitData = habitDoc.docs[0].data();
+        const completedDates = habitData.completedDates || [];
+        const completedValues = habitData.completedValues || {};
         
-        if (!habitDoc.empty) {
-          const habitData = habitDoc.docs[0].data();
-          const completedDates = habitData.completedDates || [];
-          const completedValues = habitData.completedValues || {};
+        // Load current week data
+        weekDates.forEach(date => {
+          const dateString = formatDateString(date);
+          const key = `${habit.id}-${dateString}`;
           
-          // Check which dates in this week are completed
-          weekDates.forEach(date => {
+          if (habit.type === 'number') {
+            const value = completedValues[dateString] || 0;
+            habitNumberValues[key] = value;
+            habitProgress[key] = value >= (habit.target || 1);
+          } else {
+            habitProgress[key] = completedDates.includes(dateString);
+          }
+        });
+        
+        // For Process Appointments habit, also load ALL data from Sept 1 to Dec 1
+        if (habit.name === 'Process Appointments') {
+          const goalStart = new Date('2024-09-01');
+          const goalEnd = new Date('2024-12-01');
+          const currentDate = new Date();
+          const endDate = currentDate < goalEnd ? currentDate : goalEnd;
+          
+          // Load all dates from Sept 1 to current date for leadership goal calculation
+          for (let date = new Date(goalStart); date <= endDate; date.setDate(date.getDate() + 1)) {
             const dateString = formatDateString(date);
             const key = `${habit.id}-${dateString}`;
             
-            if (habit.type === 'number') {
+            // Only add if not already loaded (to avoid overwriting current week data)
+            if (!(key in habitNumberValues)) {
               const value = completedValues[dateString] || 0;
               habitNumberValues[key] = value;
-              habitProgress[key] = value >= (habit.target || 1);
-            } else {
-              habitProgress[key] = completedDates.includes(dateString);
             }
-          });
+          }
+          
+          console.log('🎯 Loaded Process Appointments data from Sept 1 to current date');       
         }
       }
-      
-      setCompletedHabits(habitProgress);
-      setHabitValues(habitNumberValues);
-    } catch (error) {
-      console.error('Error loading weekly progress:', error);
-    } finally {
-      setLoading(false);
     }
-  };
-
+    
+    setCompletedHabits(habitProgress);
+    setHabitValues(habitNumberValues);
+  } catch (error) {
+    console.error('Error loading weekly progress:', error);
+  } finally {
+    setLoading(false);
+  }
+};
   const updateHabitValue = async (habit, date, value) => {
     if (!user) return;
     
@@ -429,12 +483,14 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
                               {CUSTOM_WEEK_DAYS[index].short}
                             </div>
                             <div className={`text-xs mt-1 ${
-                              isToday(date) ? 'text-blue-600 font-bold' : 'text-gray-500'
+                              isToday(date) 
+                                ? 'text-white bg-blue-600 font-bold px-2 py-1 rounded-full border-2 border-blue-600' 
+                                : 'text-gray-500'
                             }`}>
                               {date.getDate()}
                             </div>
                             {isToday(date) && (
-                              <div className="w-2 h-2 bg-blue-600 rounded-full mx-auto mt-1"></div>
+                              <div className="w-2 h-2 bg-blue-600 rounded-full mx-auto mt-1 animate-pulse"></div>
                             )}
                             <div className="text-xs text-green-600 font-semibold mt-1">
                               {getDailyScore(date)} pts
@@ -538,13 +594,11 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
                             <td className="p-2 sm:p-4 text-center bg-gray-50 border-l min-w-[80px]">
                               <div className="text-xs sm:text-sm font-medium text-gray-700">
                                 {habit.type === 'number' ? (
-                                  // Sum all values for number habits
                                   weekDates.reduce((sum, date) => {
                                     const key = `${habit.id}-${formatDateString(date)}`;
                                     return sum + (habitValues[key] || 0);
                                   }, 0)
                                 ) : (
-                                  // Count completed days for boolean habits
                                   weekDates.reduce((sum, date) => {
                                     const key = `${habit.id}-${formatDateString(date)}`;
                                     return sum + (completedHabits[key] ? 1 : 0);
@@ -554,7 +608,37 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
                               <div className="text-xs text-gray-500">
                                 {habit.type === 'number' ? habit.unit : 'days'}
                               </div>
-                            </td>
+                              {/* Leadership Goal Progress for Process Appointments */}
+                                {(() => {
+                                  const goalProgress = getLeadershipGoalProgress(habit, habitValues);
+                                  if (goalProgress && goalProgress.isActive) {
+                                    return (
+                                      <div className="mt-2 pt-2 border-t border-gray-300">
+                                        <div className="text-xs font-semibold text-purple-700">
+                                          Leadership Goal
+                                        </div>
+                                        <div className="text-xs text-purple-600">
+                                          {goalProgress.total}/{goalProgress.target}
+                                        </div>
+                                        <div className="text-xs text-red-600 font-medium">
+                                          {goalProgress.remaining} needed
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                          {goalProgress.daysRemaining} days left
+                                        </div>
+                                        <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
+                                          <div 
+                                            className="bg-purple-600 h-1.5 rounded-full transition-all"
+                                            style={{ width: `${goalProgress.progress}%` }}
+                                          ></div>
+                                        </div>
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                              </td>
+                            
                           </tr>
                         ))
                       )}
@@ -757,6 +841,55 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
                   </div>
                 </>
               )}
+              {(() => {
+                    const appointmentsHabit = scoringHabits.find(h => h.name === 'Process Appointments');
+                    const goalProgress = appointmentsHabit ? getLeadershipGoalProgress(appointmentsHabit, habitValues) : null;
+                    
+                    if (goalProgress && goalProgress.isActive) {
+                        return (
+                          <div className="mb-4 bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-lg p-4">
+                          <h4 className="font-bold text-white mb-2 text-sm flex items-center">
+                            🎯 Leadership Promotion Goal
+                          </h4>
+                          <div className="grid grid-cols-2 gap-4 mb-3">
+                            <div className="text-center">
+                              <div className="text-2xl font-bold">{goalProgress.total}</div>
+                              <div className="text-xs opacity-90">Completed</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-2xl font-bold text-yellow-300">{goalProgress.remaining}</div>
+                              <div className="text-xs opacity-90">Remaining</div>
+                            </div>
+                          </div>
+                          <div className="mb-2">
+                            <div className="flex justify-between text-xs mb-1">
+                              <span>Progress</span>
+                              <span>{Math.round(goalProgress.progress)}%</span>
+                            </div>
+                            <div className="w-full bg-white bg-opacity-30 rounded-full h-2">
+                              <div 
+                                className="bg-yellow-300 h-2 rounded-full transition-all"
+                                style={{ width: `${goalProgress.progress}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                          <div className="text-xs opacity-90 text-center">
+                            {goalProgress.daysRemaining} days remaining until December 1st
+                          </div>
+                          {goalProgress.remaining > 0 && goalProgress.daysRemaining > 0 && (
+                            <div className="text-xs text-center mt-2 bg-white bg-opacity-20 rounded px-2 py-1">
+                              Need ~{Math.ceil(goalProgress.remaining / goalProgress.daysRemaining)} per day to reach goal
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                  
+                  {/* Rest of your existing summary code... */}
+                </div>
+              )}
 
               {customHabits.length > 0 && (
                 <>
@@ -800,8 +933,7 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
                   <div><strong>Checkmarks:</strong> 1 point per completion</div>
                   <div><strong>Numbers:</strong> Actual number entered (appointments, contacts, etc.)</div>
                 </div>
-              </div>
-            </div>
+              </div>            
           )}
 
           {/* Week Structure Info */}

@@ -14,7 +14,7 @@ const HabitTrackerApp = () => {
   const [userHabits, setUserHabits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewingUser, setViewingUser] = useState(null);
-  const [signingIn, setSigningIn] = useState(false); // Add loading state for sign in
+  const [signingIn, setSigningIn] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -46,13 +46,11 @@ const HabitTrackerApp = () => {
     }
   };
 
-  // Add Google Sign In function
   const handleGoogleSignIn = async () => {
     setSigningIn(true);
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
-      // User state will be automatically updated by useAuthState hook
     } catch (error) {
       console.error('Error signing in:', error);
       alert('Failed to sign in. Please try again.');
@@ -67,6 +65,10 @@ const HabitTrackerApp = () => {
 
   const handleCloseUserProfile = () => {
     setViewingUser(null);
+  };
+
+  const handleSignOut = () => {
+    auth.signOut();
   };
 
   if (!user) {
@@ -109,9 +111,8 @@ const HabitTrackerApp = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Navigation Header */}
-      // Update your navigation section
-      <nav className="bg-white shadow-sm border-b habit-tracker-nav">
-        <div className="max-w-6xl mx-auto">
+      <nav className="bg-white shadow-sm border-b">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <div className="flex items-center justify-between h-14 sm:h-16">
             <div className="flex items-center">
               <h1 className="text-lg sm:text-xl font-bold text-gray-800 flex items-center">
@@ -120,80 +121,95 @@ const HabitTrackerApp = () => {
               </h1>
             </div>
             
-            <div className="nav-buttons">
+            <div className="flex items-center space-x-1 sm:space-x-2 md:space-x-4">
               <button
                 onClick={() => setCurrentView('dashboard')}
-                data-emoji="📊"
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                className={`px-2 sm:px-3 md:px-4 py-2 rounded-lg font-medium transition-colors text-xs sm:text-sm md:text-base whitespace-nowrap ${
                   currentView === 'dashboard' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
                 }`}
               >
-                <span>Dashboard</span>
+                <span className="hidden sm:inline">📊 </span>Dashboard
               </button>
               <button
                 onClick={() => setCurrentView('addHabits')}
-                data-emoji="➕"
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                className={`px-2 sm:px-3 md:px-4 py-2 rounded-lg font-medium transition-colors text-xs sm:text-sm md:text-base whitespace-nowrap ${
                   currentView === 'addHabits' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
                 }`}
               >
-                <span>Add Habits</span>
+                <span className="hidden sm:inline">➕ </span>Add Habits
               </button>
               <button
                 onClick={() => setCurrentView('leaderboard')}
-                data-emoji="🏆"
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                className={`px-2 sm:px-3 md:px-4 py-2 rounded-lg font-medium transition-colors text-xs sm:text-sm md:text-base whitespace-nowrap ${
                   currentView === 'leaderboard' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
                 }`}
               >
-                <span>Leaderboard</span>
+                <span className="hidden sm:inline">🏆 </span>Leaderboard
               </button>
+              
+              {/* User Menu */}
+              <div className="flex items-center ml-2 sm:ml-4 border-l border-gray-200 pl-2 sm:pl-4">
+                <div className="flex items-center space-x-2 sm:space-x-3">
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName}
+                    className="w-6 h-6 sm:w-8 sm:h-8 rounded-full"
+                  />
+                  <span className="hidden md:block text-xs sm:text-sm text-gray-700 max-w-20 lg:max-w-none truncate">
+                    {user.displayName}
+                  </span>
+                  <button
+                    onClick={handleSignOut}
+                    className="text-xs sm:text-sm text-gray-500 hover:text-gray-700 transition-colors whitespace-nowrap"
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              </div>
             </div>
-            
-            {/* Rest of navigation */}
           </div>
         </div>
       </nav>
 
       {/* Main Content */}
-      <main className="py-6">
+      <main className="py-4 sm:py-6 px-3 sm:px-4 lg:px-6">
         {currentView === 'dashboard' && (
-          <div>
+          <div className="max-w-7xl mx-auto">
             {/* Quick Stats Header */}
-            <div className="quick-stats">
-              <div className="quick-stat-card bg-white rounded-lg p-6 border">
-                <div className="flex items-center">
+            <div className="mb-6 sm:mb-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                <div className="bg-white rounded-lg p-4 sm:p-6 border shadow-sm">
                   <div className="flex items-center">
-                    <div className="quick-stat-icon text-3xl mr-4">🎯</div>
+                    <div className="text-2xl sm:text-3xl mr-3 sm:mr-4">🎯</div>
                     <div>
-                      <div className="quick-stat-number text-2xl font-bold text-gray-800">
+                      <div className="text-xl sm:text-2xl font-bold text-gray-800">
                         {userHabits.filter(h => !h.isCustom).length}
                       </div>
-                      <div className="quick-stat-label text-sm text-gray-600">Scoring Habits</div>
+                      <div className="text-xs sm:text-sm text-gray-600">Scoring Habits</div>
                     </div>
                   </div>
                 </div>
                 
-                <div className="quick-stat-card bg-white rounded-lg p-6 border">
+                <div className="bg-white rounded-lg p-4 sm:p-6 border shadow-sm">
                   <div className="flex items-center">
-                    <div className="quick-stat-icon text-3xl mr-4">⭐</div>
+                    <div className="text-2xl sm:text-3xl mr-3 sm:mr-4">⭐</div>
                     <div>
-                      <div className="quick-stat-number text-2xl font-bold text-gray-800">
+                      <div className="text-xl sm:text-2xl font-bold text-gray-800">
                         {userHabits.filter(h => h.isCustom).length}
                       </div>
-                      <div className="quick-stat-label text-sm text-gray-600">Custom Habits</div>
+                      <div className="text-xs sm:text-sm text-gray-600">Custom Habits</div>
                     </div>
                   </div>
                 </div>
                 
-                <div className="quick-stat-card bg-white rounded-lg p-6 border">
+                <div className="bg-white rounded-lg p-4 sm:p-6 border shadow-sm sm:col-span-2 lg:col-span-1">
                   <div className="flex items-center">
-                    <div className="quick-stat-icon text-3xl mr-4">🔥</div>
+                    <div className="text-2xl sm:text-3xl mr-3 sm:mr-4">🔥</div>
                     <div>
-                      <div className="quick-stat-number text-2xl font-bold text-gray-800">
+                      <div className="text-xl sm:text-2xl font-bold text-gray-800">
                         {userHabits.length}
                       </div>
-                      <div className="quick-stat-label text-sm text-gray-600">Total Habits</div>
+                      <div className="text-xs sm:text-sm text-gray-600">Total Habits</div>
                     </div>
                   </div>
                 </div>
@@ -201,21 +217,23 @@ const HabitTrackerApp = () => {
             </div>
 
             {/* Weekly Habit Tracker */}
-            <WeeklyHabitTracker 
-              habits={userHabits} 
-              onRefreshHabits={loadUserHabits}
-            />
+            <div className="w-full overflow-x-auto">
+              <WeeklyHabitTracker 
+                habits={userHabits} 
+                onRefreshHabits={loadUserHabits}
+              />
+            </div>
           </div>
         )}
 
         {currentView === 'addHabits' && (
-          <div>
+          <div className="max-w-6xl mx-auto">
             {/* Page Header */}
-            <div className="max-w-4xl mx-auto px-6 mb-6">
-              <h2 className="text-2xl font-bold text-gray-800 mb-2">
+            <div className="mb-6">
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">
                 Add New Habits
               </h2>
-              <p className="text-gray-600">
+              <p className="text-sm sm:text-base text-gray-600">
                 Choose from predefined habits that contribute to your score, or create custom personal habits
               </p>
             </div>
@@ -225,18 +243,18 @@ const HabitTrackerApp = () => {
 
             {/* Current Habits Summary */}
             {userHabits.length > 0 && (
-              <div className="max-w-4xl mx-auto px-6 mt-8">
-                <div className="bg-white rounded-lg border p-6">
+              <div className="mt-8">
+                <div className="bg-white rounded-lg border p-4 sm:p-6 shadow-sm">
                   <h3 className="font-semibold text-gray-800 mb-4">Your Current Habits</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {userHabits.map(habit => (
                       <div key={habit.id} className={`flex items-center p-3 rounded-lg ${
                         habit.isCustom ? 'bg-gray-50 border-gray-200' : 'bg-blue-50 border-blue-200'
                       } border`}>
                         <span className="text-xl mr-3">{habit.icon}</span>
-                        <div>
-                          <div className="font-medium text-gray-800">{habit.name}</div>
-                          <div className="text-sm text-gray-500">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-gray-800 truncate">{habit.name}</div>
+                          <div className="text-sm text-gray-500 truncate">
                             {habit.isCustom ? 'Custom habit' : `${habit.category} • Scoring habit`}
                           </div>
                         </div>
@@ -250,7 +268,39 @@ const HabitTrackerApp = () => {
         )}
 
         {currentView === 'leaderboard' && (
-          <Leaderboard onViewUserProfile={handleViewUserProfile} />
+          <div className="max-w-6xl mx-auto">
+            <Leaderboard onViewUserProfile={handleViewUserProfile} />
+          </div>
+        )}
+
+        {/* Welcome Message for New Users */}
+        {!loading && userHabits.length === 0 && currentView === 'dashboard' && (
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center py-8 sm:py-12 bg-white rounded-lg border shadow-sm">
+              <div className="text-4xl sm:text-6xl mb-4">🎯</div>
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4">
+                Welcome to Habit Tracker!
+              </h2>
+              <p className="text-sm sm:text-base text-gray-600 mb-6 max-w-md mx-auto px-4">
+                Start building better habits today. Add some predefined habits to begin scoring points 
+                and competing on the leaderboard!
+              </p>
+              <div className="flex flex-col sm:flex-row gap-4 justify-center px-4">
+                <button
+                  onClick={() => setCurrentView('addHabits')}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
+                >
+                  Add Your First Habits
+                </button>
+                <button
+                  onClick={() => setCurrentView('leaderboard')}
+                  className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm sm:text-base"
+                >
+                  View Leaderboard
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
 
@@ -266,39 +316,9 @@ const HabitTrackerApp = () => {
       {/* Loading State */}
       {loading && currentView === 'dashboard' && (
         <div className="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center z-40">
-          <div className="bg-white rounded-lg p-6 flex items-center">
+          <div className="bg-white rounded-lg p-6 flex items-center shadow-lg">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3"></div>
             <span className="text-gray-700">Loading your habits...</span>
-          </div>
-        </div>
-      )}
-
-      {/* Welcome Message for New Users */}
-      {!loading && userHabits.length === 0 && currentView === 'dashboard' && (
-        <div className="max-w-4xl mx-auto px-6">
-          <div className="text-center py-12 bg-white rounded-lg border">
-            <div className="text-6xl mb-4">🎯</div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-4">
-              Welcome to Habit Tracker!
-            </h2>
-            <p className="text-gray-600 mb-6 max-w-md mx-auto">
-              Start building better habits today. Add some predefined habits to begin scoring points 
-              and competing on the leaderboard!
-            </p>
-            <div className="space-x-4">
-              <button
-                onClick={() => setCurrentView('addHabits')}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Add Your First Habits
-              </button>
-              <button
-                onClick={() => setCurrentView('leaderboard')}
-                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                View Leaderboard
-              </button>
-            </div>
           </div>
         </div>
       )}
