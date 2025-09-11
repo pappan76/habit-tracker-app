@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { collection, addDoc, serverTimestamp, query, where, getDocs, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth, db } from '../services/firebase';
 
@@ -7,7 +7,6 @@ const PredefinedHabits = ({ onHabitAdded }) => {
   const [user] = useAuthState(auth);
   const [selectedHabits, setSelectedHabits] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isMigrating, setIsMigrating] = useState(false);
 
   const predefinedHabits = [
     {
@@ -90,85 +89,6 @@ const PredefinedHabits = ({ onHabitAdded }) => {
     }
   ];
 
-  // Migration function
-  const runMigration = async () => {
-    if (!window.confirm('Run migration to update habit names?\n\nThis will change:\n- "Meet & Greets" → "Retail"\n- "New Customers" → "Org Chart"')) {
-      return;
-    }
-
-    setIsMigrating(true);
-    
-    try {
-      console.log('Starting habit name migration...');
-      
-      // Query for habits with old names
-      const meetGreetsQuery = query(
-        collection(db, 'habits'),
-        where('name', '==', 'Meet & Greets')
-      );
-      
-      const newCustomersQuery = query(
-        collection(db, 'habits'),
-        where('name', '==', 'New Customers')
-      );
-      
-      // Get the documents
-      const [meetGreetsSnapshot, newCustomersSnapshot] = await Promise.all([
-        getDocs(meetGreetsQuery),
-        getDocs(newCustomersQuery)
-      ]);
-      
-      console.log(`Found ${meetGreetsSnapshot.docs.length} "Meet & Greets" habits`);
-      console.log(`Found ${newCustomersSnapshot.docs.length} "New Customers" habits`);
-      
-      // Use batch for atomic updates
-      const batch = writeBatch(db);
-      
-      // Update Meet & Greets to Retail
-      meetGreetsSnapshot.docs.forEach(docSnapshot => {
-        batch.update(docSnapshot.ref, {
-          name: 'Retail',
-          description: 'Focus on retail activities and customer engagement',
-          icon: '🏪',
-          category: 'Business',
-          unit: 'activities',
-          target: 5,
-          updatedAt: new Date()
-        });
-      });
-      
-      // Update New Customers to Org Chart
-      newCustomersSnapshot.docs.forEach(docSnapshot => {
-        batch.update(docSnapshot.ref, {
-          name: 'Org Chart',
-          description: 'Work on organizational structure and team development',
-          icon: '📊',
-          category: 'Business',
-          updatedAt: new Date()
-        });
-      });
-      
-      // Commit all updates
-      await batch.commit();
-      
-      const totalUpdated = meetGreetsSnapshot.docs.length + newCustomersSnapshot.docs.length;
-      
-      alert(`Migration completed successfully!\n\nUpdated:\n- Meet & Greets: ${meetGreetsSnapshot.docs.length}\n- New Customers: ${newCustomersSnapshot.docs.length}\n- Total: ${totalUpdated}`);
-      
-      // Mark migration as complete
-      localStorage.setItem('habitNamesUpdated', 'true');
-      
-      // Refresh habits if callback provided
-      if (onHabitAdded) onHabitAdded();
-      
-    } catch (error) {
-      console.error('Migration error:', error);
-      alert(`Migration failed: ${error.message}`);
-    } finally {
-      setIsMigrating(false);
-    }
-  };
-
   const toggleHabitSelection = (habitId) => {
     setSelectedHabits(prev => 
       prev.includes(habitId) 
@@ -240,27 +160,6 @@ const PredefinedHabits = ({ onHabitAdded }) => {
               Select from our curated list of professional and personal development habits
             </p>
           </div>
-          
-          {/* Migration Button */}
-          <button
-            onClick={runMigration}
-            disabled={isMigrating}
-            className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-              isMigrating
-                ? 'bg-gray-400 text-white cursor-not-allowed'
-                : 'bg-red-600 text-white hover:bg-red-700'
-            }`}
-          >
-            {isMigrating ? 'Migrating...' : 'Run Migration'}
-          </button>
-        </div>
-        
-        {/* Migration Info */}
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
-          <p className="text-sm text-yellow-800">
-            <strong>Migration:</strong> Use the "Run Migration" button to update existing habits:
-            "Meet & Greets" → "Retail" and "New Customers" → "Org Chart"
-          </p>
         </div>
       </div>
 

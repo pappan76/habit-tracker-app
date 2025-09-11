@@ -24,80 +24,82 @@ const UserProfileViewer = ({ userId, userName, onClose }) => {
   const weekRange = getWeekRangeString(currentWeek);
   const scoringHabits = userHabits.filter(habit => habit.isCustom !== true && habit.isCustom !== 'true');
 
+  // Load user profile and habits when userId changes
   useEffect(() => {
-    if (userId) {
-      loadUserProfile();
-      loadUserHabits();
-    }
+    if (!userId) return;
+
+    const loadUserProfile = async () => {
+      try {
+        const userDoc = await getDoc(doc(db, 'users', userId));
+        if (userDoc.exists()) {
+          setUserProfile({ ...userDoc.data(), id: userId });
+        }
+      } catch (error) {
+        console.error('Error loading user profile:', error);
+      }
+    };
+
+    const loadUserHabits = async () => {
+      try {
+        const habitsQuery = query(collection(db, 'habits'), where('userId', '==', userId));
+        const habitsSnapshot = await getDocs(habitsQuery);
+        
+        if (habitsSnapshot.empty) {
+          setUserHabits([]);
+          return;
+        }
+        
+        const allHabits = habitsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const scoringHabits = allHabits.filter(habit => habit.isCustom !== true && habit.isCustom !== 'true');
+        setUserHabits(scoringHabits);
+      } catch (error) {
+        console.error('Error loading user habits:', error);
+        setUserHabits([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUserProfile();
+    loadUserHabits();
   }, [userId]);
 
+  // Load weekly progress when habits or current week changes
   useEffect(() => {
-    if (userHabits.length > 0) {
-      loadWeeklyProgress();
-    }
-  }, [userHabits, currentWeek]);
+    if (userHabits.length === 0) return;
 
-  const loadUserProfile = async () => {
-    try {
-      const userDoc = await getDoc(doc(db, 'users', userId));
-      if (userDoc.exists()) {
-        setUserProfile({ ...userDoc.data(), id: userId });
-      }
-    } catch (error) {
-      console.error('Error loading user profile:', error);
-    }
-  };
-
-  const loadUserHabits = async () => {
-    try {
-      const habitsQuery = query(collection(db, 'habits'), where('userId', '==', userId));
-      const habitsSnapshot = await getDocs(habitsQuery);
-      
-      if (habitsSnapshot.empty) {
-        setUserHabits([]);
-        return;
-      }
-      
-      const allHabits = habitsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      const scoringHabits = allHabits.filter(habit => habit.isCustom !== true && habit.isCustom !== 'true');
-      setUserHabits(scoringHabits);
-    } catch (error) {
-      console.error('Error loading user habits:', error);
-      setUserHabits([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadWeeklyProgress = async () => {
-    try {
-      const habitProgress = {};
-      const habitNumberValues = {};
-      
-      for (const habit of userHabits) {
-        const completedDates = habit.completedDates || [];
-        const completedValues = habit.completedValues || {};
+    const loadWeeklyProgress = async () => {
+      try {
+        const habitProgress = {};
+        const habitNumberValues = {};
         
-        weekDates.forEach(date => {
-          const dateString = formatDateString(date);
-          const key = `${habit.id}-${dateString}`;
+        for (const habit of userHabits) {
+          const completedDates = habit.completedDates || [];
+          const completedValues = habit.completedValues || {};
           
-          if (habit.type === 'number') {
-            const value = completedValues[dateString] || 0;
-            habitNumberValues[key] = value;
-            habitProgress[key] = value >= (habit.target || 1);
-          } else {
-            habitProgress[key] = completedDates.includes(dateString);
-          }
-        });
+          weekDates.forEach(date => {
+            const dateString = formatDateString(date);
+            const key = `${habit.id}-${dateString}`;
+            
+            if (habit.type === 'number') {
+              const value = completedValues[dateString] || 0;
+              habitNumberValues[key] = value;
+              habitProgress[key] = value >= (habit.target || 1);
+            } else {
+              habitProgress[key] = completedDates.includes(dateString);
+            }
+          });
+        }
+        
+        setCompletedHabits(habitProgress);
+        setHabitValues(habitNumberValues);
+      } catch (error) {
+        console.error('Error loading weekly progress:', error);
       }
-      
-      setCompletedHabits(habitProgress);
-      setHabitValues(habitNumberValues);
-    } catch (error) {
-      console.error('Error loading weekly progress:', error);
-    }
-  };
+    };
+
+    loadWeeklyProgress();
+  }, [userHabits, currentWeek, weekDates]);
 
   const getDailyScore = (date) => {
     const dateString = formatDateString(date);

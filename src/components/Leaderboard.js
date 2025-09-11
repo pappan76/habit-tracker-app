@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, doc, getDoc,setDoc,updateDoc, where, orderBy } from 'firebase/firestore';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth, db } from '../services/firebase';
 import { getCustomWeekDates, formatDateString, getWeekRangeString } from '../utils/weekUtils';
+import { collection, query, getDocs, doc, getDoc, setDoc, where } from 'firebase/firestore';
 
 const Leaderboard = ({ onViewUserProfile }) => {
   const [user] = useAuthState(auth);
@@ -11,168 +11,170 @@ const Leaderboard = ({ onViewUserProfile }) => {
   const [timeFrame, setTimeFrame] = useState('currentWeek'); // currentWeek, lastWeek, allTime
   const [userProfile, setUserProfile] = useState(null);
 
+  const loadUserProfile = useCallback(async () => {
+    if (!user) return;
+    
+    try {
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      if (userDoc.exists()) {
+        setUserProfile(userDoc.data());
+      } else {
+        // Create default profile
+        const defaultProfile = {
+          displayName: user.displayName || user.email.split('@')[0],
+          email: user.email,
+          isPublic: true,
+          showOnLeaderboard: true,
+          avatar: '👤',
+          joinedAt: new Date(),
+          totalWeeksActive: 0
+        };
+        // ✅ Fixed: use setDoc with merge instead of updateDoc
+        await setDoc(doc(db, 'users', user.uid), defaultProfile, { merge: true });
+        setUserProfile(defaultProfile);
+      }
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+    }
+  }, [user]);
+
+  const loadLeaderboard = useCallback(async () => {
+    setLoading(true);
+    try {
+      // Get all users who want to show on leaderboard
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('showOnLeaderboard', '==', true)
+      );
+      const usersSnapshot = await getDocs(usersQuery);
+      
+      if (usersSnapshot.empty) {
+        console.log('No users found with showOnLeaderboard=true');
+        setLeaderboardData([]);
+        return;
+      }
+      
+      const leaderboardEntries = [];
+      
+      for (const userDoc of usersSnapshot.docs) {
+        const userData = userDoc.data();
+        const userId = userDoc.id;
+        
+        try {
+          // Get user's habits - simplified query
+          const habitsQuery = query(
+            collection(db, 'habits'),
+            where('userId', '==', userId)
+          );
+          const habitsSnapshot = await getDocs(habitsQuery);
+          
+          if (habitsSnapshot.empty) continue;
+          
+          // Filter habits in JavaScript to avoid Firestore query issues
+          const allHabits = habitsSnapshot.docs.map(doc => ({ 
+            id: doc.id, 
+            ...doc.data() 
+          }));
+          
+          // Only include non-custom habits for scoring
+          const habits = allHabits.filter(habit => 
+            habit.isCustom !== true && habit.isCustom !== 'true'
+          );
+          
+          if (habits.length === 0) continue;
+          
+          // Calculate score based on timeframe
+          let score = 0;
+          let weekDates = [];
+          
+          if (timeFrame === 'currentWeek') {
+            weekDates = getCustomWeekDates(new Date());
+          } else if (timeFrame === 'lastWeek') {
+            const lastWeek = new Date();
+            lastWeek.setDate(lastWeek.getDate() - 7);
+            weekDates = getCustomWeekDates(lastWeek);
+          } else if (timeFrame === 'allTime') {
+            // For all-time, calculate last 4 weeks
+            const fourWeeksAgo = new Date();
+            fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+            
+            for (let i = 0; i < 28; i++) {
+              const date = new Date(fourWeeksAgo);
+              date.setDate(date.getDate() + i);
+              weekDates.push(date);
+            }
+          }
+          
+          // Calculate score for the timeframe with better error handling
+          for (const habit of habits) {
+            try {
+              for (const date of weekDates) {
+                const dateString = formatDateString(date);
+                
+                if (habit.type === 'number' && habit.completedValues && typeof habit.completedValues === 'object') {
+                  const value = habit.completedValues[dateString];
+                  if (typeof value === 'number' && !isNaN(value)) {
+                    score += value;
+                  }
+                } else if (habit.completedDates && Array.isArray(habit.completedDates)) {
+                  if (habit.completedDates.includes(dateString)) {
+                    score += 1;
+                  }
+                }
+              }
+            } catch (habitError) {
+              console.error(`Error processing habit ${habit.id}:`, habitError);
+            }
+          }
+          
+          // Add entry even with 0 score for now (for debugging)
+          leaderboardEntries.push({
+            userId,
+            displayName: userData.displayName || userData.email?.split('@')[0] || 'Anonymous',
+            avatar: userData.avatar || '👤',
+            score,
+            totalHabits: habits.length,
+            joinedAt: userData.joinedAt,
+            isCurrentUser: userId === user?.uid
+          });
+          
+        } catch (userError) {
+          console.error(`Error processing user ${userId}:`, userError);
+        }
+      }
+      
+      // Filter out zero scores only if we have entries with scores
+      const hasNonZeroScores = leaderboardEntries.some(entry => entry.score > 0);
+      const filteredEntries = hasNonZeroScores 
+        ? leaderboardEntries.filter(entry => entry.score > 0)
+        : leaderboardEntries; // Show all if no one has scores
+      
+      // Sort by score (highest first)
+      filteredEntries.sort((a, b) => b.score - a.score);
+      
+      // Add rank
+      filteredEntries.forEach((entry, index) => {
+        entry.rank = index + 1;
+      });
+      
+      setLeaderboardData(filteredEntries);
+      
+    } catch (error) {
+      console.error('Error loading leaderboard:', error);
+      setLeaderboardData([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [timeFrame, user?.uid]);
+
   useEffect(() => {
     if (user) {
       loadUserProfile();
     }
     loadLeaderboard();
-  }, [user, timeFrame]);
-
-  const loadUserProfile = async () => {
-  try {
-    const userDoc = await getDoc(doc(db, 'users', user.uid));
-    if (userDoc.exists()) {
-      setUserProfile(userDoc.data());
-    } else {
-      // Create default profile
-      const defaultProfile = {
-        displayName: user.displayName || user.email.split('@')[0],
-        email: user.email,
-        isPublic: true,
-        showOnLeaderboard: true,
-        avatar: '👤',
-        joinedAt: new Date(),
-        totalWeeksActive: 0
-      };
-      // ✅ Fixed: use setDoc with merge instead of updateDoc
-      await setDoc(doc(db, 'users', user.uid), defaultProfile, { merge: true });
-      setUserProfile(defaultProfile);
-    }
-  } catch (error) {
-    console.error('Error loading user profile:', error);
-  }
-};
-
-  const loadLeaderboard = async () => {
-  setLoading(true);
-  try {
-    // Get all users who want to show on leaderboard
-    const usersQuery = query(
-      collection(db, 'users'),
-      where('showOnLeaderboard', '==', true)
-    );
-    const usersSnapshot = await getDocs(usersQuery);
-    
-    if (usersSnapshot.empty) {
-      console.log('No users found with showOnLeaderboard=true');
-      setLeaderboardData([]);
-      return;
-    }
-    
-    const leaderboardEntries = [];
-    
-    for (const userDoc of usersSnapshot.docs) {
-      const userData = userDoc.data();
-      const userId = userDoc.id;
-      
-      try {
-        // Get user's habits - simplified query
-        const habitsQuery = query(
-          collection(db, 'habits'),
-          where('userId', '==', userId)
-        );
-        const habitsSnapshot = await getDocs(habitsQuery);
-        
-        if (habitsSnapshot.empty) continue;
-        
-        // Filter habits in JavaScript to avoid Firestore query issues
-        const allHabits = habitsSnapshot.docs.map(doc => ({ 
-          id: doc.id, 
-          ...doc.data() 
-        }));
-        
-        // Only include non-custom habits for scoring
-        const habits = allHabits.filter(habit => 
-          habit.isCustom !== true && habit.isCustom !== 'true'
-        );
-        
-        if (habits.length === 0) continue;
-        
-        // Calculate score based on timeframe
-        let score = 0;
-        let weekDates = [];
-        
-        if (timeFrame === 'currentWeek') {
-          weekDates = getCustomWeekDates(new Date());
-        } else if (timeFrame === 'lastWeek') {
-          const lastWeek = new Date();
-          lastWeek.setDate(lastWeek.getDate() - 7);
-          weekDates = getCustomWeekDates(lastWeek);
-        } else if (timeFrame === 'allTime') {
-          // For all-time, calculate last 4 weeks
-          const fourWeeksAgo = new Date();
-          fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
-          
-          for (let i = 0; i < 28; i++) {
-            const date = new Date(fourWeeksAgo);
-            date.setDate(date.getDate() + i);
-            weekDates.push(date);
-          }
-        }
-        
-        // Calculate score for the timeframe with better error handling
-        for (const habit of habits) {
-          try {
-            for (const date of weekDates) {
-              const dateString = formatDateString(date);
-              
-              if (habit.type === 'number' && habit.completedValues && typeof habit.completedValues === 'object') {
-                const value = habit.completedValues[dateString];
-                if (typeof value === 'number' && !isNaN(value)) {
-                  score += value;
-                }
-              } else if (habit.completedDates && Array.isArray(habit.completedDates)) {
-                if (habit.completedDates.includes(dateString)) {
-                  score += 1;
-                }
-              }
-            }
-          } catch (habitError) {
-            console.error(`Error processing habit ${habit.id}:`, habitError);
-          }
-        }
-        
-        // Add entry even with 0 score for now (for debugging)
-        leaderboardEntries.push({
-          userId,
-          displayName: userData.displayName || userData.email?.split('@')[0] || 'Anonymous',
-          avatar: userData.avatar || '👤',
-          score,
-          totalHabits: habits.length,
-          joinedAt: userData.joinedAt,
-          isCurrentUser: userId === user?.uid
-        });
-        
-      } catch (userError) {
-        console.error(`Error processing user ${userId}:`, userError);
-      }
-    }
-    
-    // Filter out zero scores only if we have entries with scores
-    const hasNonZeroScores = leaderboardEntries.some(entry => entry.score > 0);
-    const filteredEntries = hasNonZeroScores 
-      ? leaderboardEntries.filter(entry => entry.score > 0)
-      : leaderboardEntries; // Show all if no one has scores
-    
-    // Sort by score (highest first)
-    filteredEntries.sort((a, b) => b.score - a.score);
-    
-    // Add rank
-    filteredEntries.forEach((entry, index) => {
-      entry.rank = index + 1;
-    });
-    
-    setLeaderboardData(filteredEntries);
-    
-  } catch (error) {
-    console.error('Error loading leaderboard:', error);
-    setLeaderboardData([]);
-  } finally {
-    setLoading(false);
-  }
-};
-
-    const toggleLeaderboardVisibility = async () => {
+  }, [user, loadUserProfile, loadLeaderboard]);
+  
+  const toggleLeaderboardVisibility = async () => {
     if (!user || !userProfile) return;
     
     const newVisibility = !userProfile.showOnLeaderboard;

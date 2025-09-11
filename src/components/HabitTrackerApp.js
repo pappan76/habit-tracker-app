@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
@@ -7,6 +7,9 @@ import WeeklyHabitTracker from './WeeklyHabitTracker';
 import PredefinedHabits from './PredefinedHabits';
 import Leaderboard from './Leaderboard';
 import UserProfileViewer from './UserProfileViewer';
+import GamePlanningApp from './GamePlanningApp';
+import ContactManagementPage from './ContactManagementPage';
+
 
 const HabitTrackerApp = () => {
   const [user] = useAuthState(auth);
@@ -16,13 +19,7 @@ const HabitTrackerApp = () => {
   const [viewingUser, setViewingUser] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
 
-  useEffect(() => {
-    if (user) {
-      loadUserHabits();
-    }
-  }, [user]);
-
-  const loadUserHabits = async () => {
+  const loadUserHabits = useCallback(async () => {
     if (!user) return;
     
     setLoading(true);
@@ -44,7 +41,13 @@ const HabitTrackerApp = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      loadUserHabits();
+    }
+  }, [user, loadUserHabits]);
 
   const handleGoogleSignIn = async () => {
     setSigningIn(true);
@@ -122,7 +125,7 @@ const HabitTrackerApp = () => {
             </div>
             
             <div className="flex items-center space-x-1 sm:space-x-2 md:space-x-4">
-              <button
+             <button
                 onClick={() => setCurrentView('dashboard')}
                 className={`px-2 sm:px-3 md:px-4 py-2 rounded-lg font-medium transition-colors text-xs sm:text-sm md:text-base whitespace-nowrap ${
                   currentView === 'dashboard' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
@@ -138,6 +141,22 @@ const HabitTrackerApp = () => {
               >
                 <span className="hidden sm:inline">➕ </span>Add Habits
               </button>
+               <button
+                  onClick={() => setCurrentView('gamePlanning')}
+                  className={`px-2 sm:px-3 md:px-4 py-2 rounded-lg font-medium transition-colors text-xs sm:text-sm md:text-base whitespace-nowrap ${
+                    currentView === 'gamePlanning' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <span className="hidden sm:inline">🎯 </span>Game Planning
+                </button>
+                <button
+                  onClick={() => setCurrentView('contacts')}
+                  className={`px-2 sm:px-3 md:px-4 py-2 rounded-lg font-medium transition-colors text-xs sm:text-sm md:text-base whitespace-nowrap ${
+                    currentView === 'contacts' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <span className="hidden sm:inline">📞 </span>Contacts
+                </button>
               <button
                 onClick={() => setCurrentView('leaderboard')}
                 className={`px-2 sm:px-3 md:px-4 py-2 rounded-lg font-medium transition-colors text-xs sm:text-sm md:text-base whitespace-nowrap ${
@@ -272,6 +291,38 @@ const HabitTrackerApp = () => {
             <Leaderboard onViewUserProfile={handleViewUserProfile} />
           </div>
         )}
+        {currentView === 'gamePlanning' && (
+                  <div className="max-w-6xl mx-auto">
+                    {/* Page Header */}
+                    <div className="mb-6">
+                      <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">
+                        Game Planning Session
+                      </h2>
+                      <p className="text-sm sm:text-base text-gray-600">
+                        Set monthly goals, track weekly progress, and manage upline relationships
+                      </p>
+                    </div>
+
+                    {/* Game Planning Component */}
+                    <GamePlanningApp user={user} onRefreshData={loadUserHabits} />
+                  </div>
+                )}
+        {currentView === 'contacts' && (
+          <div className="max-w-7xl mx-auto">
+            {/* Page Header */}
+            <div className="mb-6">
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">
+                Contact Management
+              </h2>
+              <p className="text-sm sm:text-base text-gray-600">
+                Track prospects through your sales pipeline
+              </p>
+            </div>
+
+            {/* Contact Management Component */}
+            <ContactManagementPage user={user} />
+          </div>
+        )}        
 
         {/* Welcome Message for New Users */}
         {!loading && userHabits.length === 0 && currentView === 'dashboard' && (

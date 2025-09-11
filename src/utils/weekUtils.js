@@ -114,7 +114,7 @@ export const getNextWeek = (currentDate) => {
 export const isCurrentWeek = (date) => {
   const today = new Date();
   const currentWeekStart = getCustomWeekStart(today);
-  const currentWeekEnd = getCustomWeekEnd(today);
+  //const currentWeekEnd = getCustomWeekEnd(today);
   const checkWeekStart = getCustomWeekStart(date);
   
   return formatDateString(currentWeekStart) === formatDateString(checkWeekStart);

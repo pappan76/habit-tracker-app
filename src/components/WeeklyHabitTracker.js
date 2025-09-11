@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   getCustomWeekDates, 
   getWeekRangeString, 
@@ -64,6 +64,70 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
   const scoringHabits = habits.filter(habit => !habit.isCustom);
   const customHabits = habits.filter(habit => habit.isCustom);
 
+  // Load weekly progress - memoized to prevent infinite re-renders
+  const loadWeeklyProgress = useCallback(async () => {
+    if (!user || habits.length === 0) return;
+    
+    setLoading(true);
+    try {
+      const habitProgress = {};
+      const habitNumberValues = {};
+      
+      for (const habit of habits) {
+        const habitDoc = await getDocs(query(collection(db, 'habits'), where('__name__', '==', habit.id)));
+        
+        if (!habitDoc.empty) {
+          const habitData = habitDoc.docs[0].data();
+          const completedDates = habitData.completedDates || [];
+          const completedValues = habitData.completedValues || {};
+          
+          // Load current week data
+          weekDates.forEach(date => {
+            const dateString = formatDateString(date);
+            const key = `${habit.id}-${dateString}`;
+            
+            if (habit.type === 'number') {
+              const value = completedValues[dateString] || 0;
+              habitNumberValues[key] = value;
+              habitProgress[key] = value >= (habit.target || 1);
+            } else {
+              habitProgress[key] = completedDates.includes(dateString);
+            }
+          });
+          
+          // For Process Appointments habit, also load ALL data from Sept 1 to Dec 1
+          if (habit.name === 'Process Appointments') {
+            const goalStart = new Date('2024-09-01');
+            const goalEnd = new Date('2024-12-01');
+            const currentDate = new Date();
+            const endDate = currentDate < goalEnd ? currentDate : goalEnd;
+            
+            // Load all dates from Sept 1 to current date for leadership goal calculation
+            for (let date = new Date(goalStart); date <= endDate; date.setDate(date.getDate() + 1)) {
+              const dateString = formatDateString(date);
+              const key = `${habit.id}-${dateString}`;
+              
+              // Only add if not already loaded (to avoid overwriting current week data)
+              if (!(key in habitNumberValues)) {
+                const value = completedValues[dateString] || 0;
+                habitNumberValues[key] = value;
+              }
+            }
+            
+            console.log('🎯 Loaded Process Appointments data from Sept 1 to current date');       
+          }
+        }
+      }
+      
+      setCompletedHabits(habitProgress);
+      setHabitValues(habitNumberValues);
+    } catch (error) {
+      console.error('Error loading weekly progress:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user, habits, currentWeek]); // Remove weekDates dependency to prevent infinite loop
+
   // Generate week history (last 12 weeks)
   useEffect(() => {
     const generateWeekHistory = () => {
@@ -85,77 +149,13 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
     generateWeekHistory();
   }, []);
 
-  // Load completed habits for the current week
+  // Load completed habits for the current week - now includes loadWeeklyProgress
   useEffect(() => {
     if (!user || habits.length === 0) return;
     
     loadWeeklyProgress();
-  }, [user, habits, currentWeek]);
+  }, [user, habits, currentWeek, loadWeeklyProgress]);
 
-  const loadWeeklyProgress = async () => {
-  setLoading(true);
-  try {
-    const weekStart = weekDates[0];
-    const weekEnd = weekDates[6];
-    
-    const habitProgress = {};
-    const habitNumberValues = {};
-    
-    for (const habit of habits) {
-      const habitRef = doc(db, 'habits', habit.id);
-      const habitDoc = await getDocs(query(collection(db, 'habits'), where('__name__', '==', habit.id)));
-      
-      if (!habitDoc.empty) {
-        const habitData = habitDoc.docs[0].data();
-        const completedDates = habitData.completedDates || [];
-        const completedValues = habitData.completedValues || {};
-        
-        // Load current week data
-        weekDates.forEach(date => {
-          const dateString = formatDateString(date);
-          const key = `${habit.id}-${dateString}`;
-          
-          if (habit.type === 'number') {
-            const value = completedValues[dateString] || 0;
-            habitNumberValues[key] = value;
-            habitProgress[key] = value >= (habit.target || 1);
-          } else {
-            habitProgress[key] = completedDates.includes(dateString);
-          }
-        });
-        
-        // For Process Appointments habit, also load ALL data from Sept 1 to Dec 1
-        if (habit.name === 'Process Appointments') {
-          const goalStart = new Date('2024-09-01');
-          const goalEnd = new Date('2024-12-01');
-          const currentDate = new Date();
-          const endDate = currentDate < goalEnd ? currentDate : goalEnd;
-          
-          // Load all dates from Sept 1 to current date for leadership goal calculation
-          for (let date = new Date(goalStart); date <= endDate; date.setDate(date.getDate() + 1)) {
-            const dateString = formatDateString(date);
-            const key = `${habit.id}-${dateString}`;
-            
-            // Only add if not already loaded (to avoid overwriting current week data)
-            if (!(key in habitNumberValues)) {
-              const value = completedValues[dateString] || 0;
-              habitNumberValues[key] = value;
-            }
-          }
-          
-          console.log('🎯 Loaded Process Appointments data from Sept 1 to current date');       
-        }
-      }
-    }
-    
-    setCompletedHabits(habitProgress);
-    setHabitValues(habitNumberValues);
-  } catch (error) {
-    console.error('Error loading weekly progress:', error);
-  } finally {
-    setLoading(false);
-  }
-};
   const updateHabitValue = async (habit, date, value) => {
     if (!user) return;
     
@@ -175,7 +175,6 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
     }));
 
     try {
-      const habitRef = doc(db, 'habits', habit.id);
       const habitDoc = await getDocs(query(collection(db, 'habits'), where('__name__', '==', habit.id)));
       
       if (!habitDoc.empty) {
@@ -194,6 +193,7 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
           completedDates = completedDates.filter(d => d !== dateString);
         }
         
+        const habitRef = doc(db, 'habits', habit.id);
         await updateDoc(habitRef, {
           completedDates: completedDates,
           completedValues: completedValues,
@@ -219,7 +219,6 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
     }));
 
     try {
-      const habitRef = doc(db, 'habits', habit.id);
       const habitDoc = await getDocs(query(collection(db, 'habits'), where('__name__', '==', habit.id)));
       
       if (!habitDoc.empty) {
@@ -236,6 +235,7 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
           }
         }
         
+        const habitRef = doc(db, 'habits', habit.id);
         await updateDoc(habitRef, {
           completedDates: completedDates,
           updatedAt: new Date()
@@ -886,10 +886,6 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
                     }
                     return null;
                   })()}
-                  
-                  {/* Rest of your existing summary code... */}
-                </div>
-              )}
 
               {customHabits.length > 0 && (
                 <>
@@ -934,6 +930,7 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
                   <div><strong>Numbers:</strong> Actual number entered (appointments, contacts, etc.)</div>
                 </div>
               </div>            
+            </div>
           )}
 
           {/* Week Structure Info */}
