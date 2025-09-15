@@ -310,14 +310,6 @@ const HabitTrackerApp = () => {
         {currentView === 'contacts' && (
           <div className="max-w-7xl mx-auto">
             {/* Page Header */}
-            <div className="mb-6">
-              <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">
-                Contact Management
-              </h2>
-              <p className="text-sm sm:text-base text-gray-600">
-                Track prospects through your sales pipeline
-              </p>
-            </div>
 
             {/* Contact Management Component */}
             <ContactManagementPage user={user} />

@@ -3,7 +3,7 @@ import { Calendar, Target, Users, Plus, Check, Settings, Edit3, Save, X } from '
 import { collection, query, getDocs, doc, getDoc, setDoc, where, updateDoc, addDoc } from 'firebase/firestore';
 import { db, auth } from '../services/firebase';
 import { debounce } from 'lodash'; // If you have lodash available
-import ContactManagement from './ContactManagementPage';
+
 
 
 
@@ -36,6 +36,8 @@ const GamePlanningApp = ({ user, onRefreshData }) => {
   // Upline removal
   const [showRemoveUplineModal, setShowRemoveUplineModal] = useState(false);
   const [uplineToRemove, setUplineToRemove] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
+
 
   // Default parameters
   const defaultParameters = useMemo(() => [
@@ -184,7 +186,7 @@ const GamePlanningApp = ({ user, onRefreshData }) => {
     }
   }, [user.uid]);
 
-  const isLoadingPartnerRef = useRef(false);
+//const isLoadingPartnerRef = useRef(false);
 
 const loadUserPartner = useCallback(async () => {
   if (!user?.uid) return;
@@ -262,21 +264,52 @@ const loadGamePlan = useCallback(async (userId = null) => {
     let gamePlanRef;
     let gamePlanId;
     let isSharedGamePlan = false;
-    let partnerId = null; // Declare it here
+    let partnerId = null;
+    let partnerInfo = null;
 
     if (userId) {
-      // Loading downline data - use personal game plan
-      gamePlanId = `${userId}_${selectedYear}_${selectedMonth}`;
-      gamePlanRef = doc(db, 'gamePlans', gamePlanId);
+      // Loading downline data - check if downline has a partner first
+      const downlineUserDoc = await getDoc(doc(db, 'users', userId));
+      
+      if (downlineUserDoc.exists()) {
+        const downlineUserData = downlineUserDoc.data();
+        partnerId = downlineUserData.partnerId;
+        
+        if (partnerId) {
+          // Downline has partner - load shared game plan
+          const sortedIds = [userId, partnerId].sort();
+          gamePlanId = `shared_${sortedIds.join('_')}_${selectedYear}_${selectedMonth}`;
+          gamePlanRef = doc(db, 'sharedGamePlans', gamePlanId);
+          isSharedGamePlan = true;
+          
+          // Get partner info
+          const partnerDoc = await getDoc(doc(db, 'users', partnerId));
+          if (partnerDoc.exists()) {
+            partnerInfo = {
+              id: partnerId,
+              name: partnerDoc.data().displayName || partnerDoc.data().name || 'Unknown Partner',
+              email: partnerDoc.data().email
+            };
+          }
+        } else {
+          // No partner - use individual game plan
+          gamePlanId = `${userId}_${selectedYear}_${selectedMonth}`;
+          gamePlanRef = doc(db, 'gamePlans', gamePlanId);
+        }
+      } else {
+        // User not found - use individual plan as fallback
+        gamePlanId = `${userId}_${selectedYear}_${selectedMonth}`;
+        gamePlanRef = doc(db, 'gamePlans', gamePlanId);
+      }
     } else {
-      // For current user: First check if they have a partner by checking their user document
+      // For current user: First check if they have a partner
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        partnerId = userData.partnerId; // Now it's properly assigned
+        partnerId = userData.partnerId;
       }
-      console.log('Current user partnerId:', partnerId);
+      
       if (partnerId) {
         // User has a partner - try to load shared game plan
         const sortedIds = [user.uid, partnerId].sort();
@@ -313,7 +346,14 @@ const loadGamePlan = useCallback(async (userId = null) => {
       const data = gamePlanDoc.data();
       
       if (userId) {
-        setViewingDownlineData(data);
+        // Add partnership metadata to downline data
+        setViewingDownlineData({
+          ...data,
+          hasPartner: !!partnerId,
+          partnerInfo: partnerInfo,
+          isSharedPlan: isSharedGamePlan,
+          downlineId: userId
+        });
       } else {
         setMonthlyGoals(data.monthlyGoals || defaultParameters);
         setCustomParameters(data.customParameters || []);
@@ -332,19 +372,32 @@ const loadGamePlan = useCallback(async (userId = null) => {
         lastUpdated: new Date()
       };
 
-      if (isSharedGamePlan && partnerId) { // Use partnerId here instead of selectedPartner
+      if (isSharedGamePlan && partnerId) {
         defaultData.isShared = true;
-        defaultData.partners = [user.uid, partnerId];
+        defaultData.partners = userId ? [userId, partnerId] : [user.uid, partnerId];
         
-        // Get partner name from the partner document we already fetched
+        // Get partner names
         const partnerDoc = await getDoc(doc(db, 'users', partnerId));
         const partnerData = partnerDoc.exists() ? partnerDoc.data() : {};
         
-        defaultData.partnerNames = [
-          user.displayName || user.name,
-          partnerData.displayName || partnerData.name || 'Unknown Partner'
-        ];
-        defaultData.createdBy = user.uid;
+        if (userId) {
+          // For downline shared plan
+          const downlineDoc = await getDoc(doc(db, 'users', userId));
+          const downlineData = downlineDoc.exists() ? downlineDoc.data() : {};
+          
+          defaultData.partnerNames = [
+            downlineData.displayName || downlineData.name || 'Unknown',
+            partnerData.displayName || partnerData.name || 'Unknown Partner'
+          ];
+          defaultData.createdBy = user.uid;
+        } else {
+          // For current user shared plan
+          defaultData.partnerNames = [
+            user.displayName || user.name,
+            partnerData.displayName || partnerData.name || 'Unknown Partner'
+          ];
+          defaultData.createdBy = user.uid;
+        }
       } else {
         defaultData.userId = userId || user.uid;
       }
@@ -352,7 +405,13 @@ const loadGamePlan = useCallback(async (userId = null) => {
       await setDoc(gamePlanRef, defaultData);
       
       if (userId) {
-        setViewingDownlineData(defaultData);
+        setViewingDownlineData({
+          ...defaultData,
+          hasPartner: !!partnerId,
+          partnerInfo: partnerInfo,
+          isSharedPlan: isSharedGamePlan,
+          downlineId: userId
+        });
       } else {
         setMonthlyGoals(defaultParameters);
         setCustomParameters([]);
@@ -366,7 +425,11 @@ const loadGamePlan = useCallback(async (userId = null) => {
       setViewingDownlineData({
         monthlyGoals: defaultParameters,
         customParameters: [],
-        weeklyProgress: { week1: {}, week2: {}, week3: {}, week4: {} }
+        weeklyProgress: { week1: {}, week2: {}, week3: {}, week4: {} },
+        hasPartner: false,
+        partnerInfo: null,
+        isSharedPlan: false,
+        downlineId: userId
       });
     } else {
       setMonthlyGoals(defaultParameters);
@@ -379,8 +442,7 @@ const loadGamePlan = useCallback(async (userId = null) => {
   }
 }, [user?.uid, selectedYear, selectedMonth, defaultParameters]);
 
-
-
+  // Partner management functions
  const sendPartnerRequest = useCallback(async (targetUserId, event) => {
   event?.preventDefault(); // Prevent form submission
   try {
@@ -427,7 +489,7 @@ const loadGamePlan = useCallback(async (userId = null) => {
       alert('Error sending partner request.');
     }
   }, [user.uid, user.displayName, user.name]);
-
+  
   const respondToPartnerRequest = async (requestId, accept) => {
     try {
       const requestRef = doc(db, 'partnerRequests', requestId);
@@ -491,64 +553,104 @@ const loadGamePlan = useCallback(async (userId = null) => {
   }, [user.uid, selectedPartner, loadGamePlan]);
 
   // Data saving function
-  const saveGamePlan = useCallback(async (targetUserId = null) => {
-    try {
-      let gamePlanRef;
-      let dataToSave;
-      
-      if (targetUserId && viewingDownlineData) {
-        gamePlanRef = doc(db, 'gamePlans', `${targetUserId}_${selectedYear}_${selectedMonth}`);
-        dataToSave = {
-          ...viewingDownlineData,
-          lastUpdated: new Date(),
-          lastUpdatedBy: user.uid,
-          lastUpdatedByName: user.displayName || user.name || 'Unknown User'
-        };
-      } else if (selectedPartner) {
-        const sortedIds = [user.uid, selectedPartner.id].sort();
-        const sharedGamePlanId = `shared_${sortedIds.join('_')}_${selectedYear}_${selectedMonth}`;
-        gamePlanRef = doc(db, 'sharedGamePlans', sharedGamePlanId);
-        
-        dataToSave = {
-          monthlyGoals,
-          customParameters,
-          weeklyProgress,
-          month: selectedMonth,
-          year: selectedYear,
-          lastUpdated: new Date(),
-          lastUpdatedBy: user.uid,
-          lastUpdatedByName: user.displayName || user.name,
-          isShared: true,
-          partners: [user.uid, selectedPartner.id],
-          partnerNames: [
-            user.displayName || user.name,
-            selectedPartner.displayName || selectedPartner.name
-          ]
-        };
-      } else {
-        gamePlanRef = doc(db, 'gamePlans', `${user.uid}_${selectedYear}_${selectedMonth}`);
-        dataToSave = {
-          monthlyGoals,
-          customParameters,
-          weeklyProgress,
-          userId: user.uid,
-          month: selectedMonth,
-          year: selectedYear,
-          lastUpdated: new Date()
-        };
-      }
-      
-      await setDoc(gamePlanRef, dataToSave, { merge: true });
-      
-      if (targetUserId) {
-        await loadGamePlan(targetUserId);
-      }
-    } catch (error) {
-      console.error('Error saving game plan:', error);
-    }
-  }, [user.uid, user.displayName, user.name, selectedYear, selectedMonth, monthlyGoals, customParameters, weeklyProgress, viewingDownlineData, loadGamePlan, selectedPartner]);
+ 
+// Fix 1: Use functional state updates that ensure we get the latest state
+// In your debouncedSave, remove any loadGamePlan calls:
 
-  // Load initial data
+// Fix 2: Update saveGamePlan to get fresh state at save time
+
+// Fix 3: Ensure state updates complete before triggering save
+const updateGoalTarget = async (paramId, target) => {
+  if (isReadOnly) return;
+  
+  setIsEditing(true);
+  
+  try {
+    if (selectedDownline && canEditDownlineData()) {
+      // Handle downline editing with direct Firestore approach
+      const gamePlanRef = selectedDownline.partnerId 
+        ? doc(db, 'sharedGamePlans', `shared_${[selectedDownline.id, selectedDownline.partnerId].sort().join('_')}_${selectedYear}_${selectedMonth}`)
+        : doc(db, 'gamePlans', `${selectedDownline.id}_${selectedYear}_${selectedMonth}`);
+      
+      const currentDoc = await getDoc(gamePlanRef);
+      const currentData = currentDoc.exists() ? currentDoc.data() : {
+        monthlyGoals: defaultParameters,
+        customParameters: [],
+        weeklyProgress: { week1: {}, week2: {}, week3: {}, week4: {} }
+      };
+      
+      // Update the specific field
+      if (paramId.startsWith('custom_')) {
+        const paramIndex = currentData.customParameters.findIndex(p => p.id === paramId);
+        if (paramIndex >= 0) {
+          currentData.customParameters[paramIndex].target = Number(target);
+        }
+      } else {
+        const goalIndex = currentData.monthlyGoals.findIndex(g => g.id === paramId);
+        if (goalIndex >= 0) {
+          currentData.monthlyGoals[goalIndex].target = Number(target);
+        }
+      }
+      
+      currentData.lastUpdated = new Date();
+      currentData.lastUpdatedBy = user.uid;
+      currentData.lastUpdatedByName = user.displayName || user.name;
+      
+      await setDoc(gamePlanRef, currentData);
+      
+      // Update viewingDownlineData to match
+      setViewingDownlineData(prev => ({
+        ...prev,
+        ...currentData
+      }));
+      
+    } else {
+      // Personal plan - your existing logic works
+      const gamePlanRef = doc(db, 'gamePlans', `${user.uid}_${selectedYear}_${selectedMonth}`);
+      
+      const currentDoc = await getDoc(gamePlanRef);
+      const currentData = currentDoc.exists() ? currentDoc.data() : {
+        monthlyGoals: defaultParameters,
+        customParameters: [],
+        weeklyProgress: { week1: {}, week2: {}, week3: {}, week4: {} },
+        userId: user.uid,
+        month: selectedMonth,
+        year: selectedYear
+      };
+      
+      if (paramId.startsWith('custom_')) {
+        const paramIndex = currentData.customParameters.findIndex(p => p.id === paramId);
+        if (paramIndex >= 0) {
+          currentData.customParameters[paramIndex].target = Number(target);
+        }
+      } else {
+        const goalIndex = currentData.monthlyGoals.findIndex(g => g.id === paramId);
+        if (goalIndex >= 0) {
+          currentData.monthlyGoals[goalIndex].target = Number(target);
+        }
+      }
+      
+      currentData.lastUpdated = new Date();
+      await setDoc(gamePlanRef, currentData);
+      
+      // Update React state
+      if (paramId.startsWith('custom_')) {
+        setCustomParameters(currentData.customParameters);
+      } else {
+        setMonthlyGoals(currentData.monthlyGoals);
+      }
+    }
+    
+    console.log('✅ Direct update completed');
+    
+  } catch (error) {
+    console.error('❌ Direct update failed:', error);
+  } finally {
+    setTimeout(() => setIsEditing(false), 1000);
+  }
+};
+
+// Load initial data
   const loadInitialData = useCallback(async () => {
     setIsLoading(true);
     
@@ -597,23 +699,13 @@ const loadGamePlan = useCallback(async (userId = null) => {
     }
   }, [selectedDownline, loadGamePlan, loadTasks]);
 
-  
+// 1. Update the problematic useEffects to respect the isEditing flag:
 
-  useEffect(() => {
-  if (user?.uid) {
-    if (selectedDownline) {
-      loadGamePlan(selectedDownline.id);
-    } else {
-      loadGamePlan();
-    }
-  }
-}, [selectedMonth, selectedYear, user?.uid, selectedDownline?.id]); // Only depend on selectedDownline.id
-
-  useEffect(() => {
-  if (user?.uid && !selectedDownline) {
+useEffect(() => {
+  if (user?.uid && !selectedDownline && !isEditing) { // ✅ Don't reload while editing
     loadGamePlan();
   }
-}, [selectedPartner?.id, user?.uid, selectedDownline?.id]); // Use stable object properties
+}, [selectedPartner?.id, user?.uid, selectedDownline?.id, isEditing]); // Use stable object properties
 
   useEffect(() => {
     if (user?.uid) {
@@ -653,63 +745,10 @@ const loadGamePlan = useCallback(async (userId = null) => {
     }
     return weeks;
   };
-// Create debounced save function
-const debouncedSave = useCallback(
-  debounce((userId) => {
-    if (userId) {
-      saveGamePlan(userId);
-    } else {
-      saveGamePlan();
-    }
-  }, 500),
-  [saveGamePlan]
-);
-  const updateGoalTarget = async (paramId, target) => {
-  if (isReadOnly) return;
-  
-  if (selectedDownline && canEditDownlineData()) {
-    setViewingDownlineData(prev => {
-      if (!prev) return prev;
-      
-      const updated = { ...prev };
-      if (paramId.startsWith('custom_')) {
-        updated.customParameters = (prev.customParameters || []).map(param => 
-          param.id === paramId ? { ...param, target: Number(target) } : param
-        );
-      } else {
-        updated.monthlyGoals = (prev.monthlyGoals || defaultParameters).map(goal => 
-          goal.id === paramId ? { ...goal, target: Number(target) } : goal
-        );
-      }
-      
-      return updated;
-    });
-    debouncedSave(selectedDownline.id);
 
-  } else {
-    // This is for shared plans or personal plans (no selectedDownline)
-    if (paramId.startsWith('custom_')) {
-      setCustomParameters(prev => {
-        const updated = prev.map(param => 
-          param.id === paramId ? { ...param, target: Number(target) } : param
-        );
-        return updated;
-      });
-      debouncedSave(); // ✅ No parameter for shared/personal plans
-    } else {
-      setMonthlyGoals(prev => {
-        const updated = prev.map(goal => 
-          goal.id === paramId ? { ...goal, target: Number(target) } : goal
-        );
-        return updated;
-      });
-      debouncedSave(); // ✅ No parameter for shared/personal plans
-    }
-  }
-};
 
-  const addCustomParameter = async (event) => {
-  event?.preventDefault(); // Prevent form submission
+const addCustomParameter = async (event) => {
+  event?.preventDefault();
   if (isReadOnly || !newCustomParam.name.trim()) return;
   
   const customParam = {
@@ -719,60 +758,121 @@ const debouncedSave = useCallback(
     unit: newCustomParam.unit.trim() || 'units'
   };
 
+  setIsEditing(true);
+  
+  try {
     if (selectedDownline && canEditDownlineData()) {
-      setViewingDownlineData(prev => {
-        if (!prev) return prev;
-        const updated = {
-          ...prev,
-          customParameters: [...(prev.customParameters || []), customParam]
-        };
-        setTimeout(() => saveGamePlan(selectedDownline.id), 500);
-        return updated;
-      });
+      // Direct update for downline
+      const gamePlanRef = selectedDownline.partnerId 
+        ? doc(db, 'sharedGamePlans', `shared_${[selectedDownline.id, selectedDownline.partnerId].sort().join('_')}_${selectedYear}_${selectedMonth}`)
+        : doc(db, 'gamePlans', `${selectedDownline.id}_${selectedYear}_${selectedMonth}`);
+      
+      const currentDoc = await getDoc(gamePlanRef);
+      const currentData = currentDoc.exists() ? currentDoc.data() : { customParameters: [] };
+      
+      currentData.customParameters = [...(currentData.customParameters || []), customParam];
+      currentData.lastUpdated = new Date();
+      
+      await setDoc(gamePlanRef, currentData, { merge: true });
+      
+      setViewingDownlineData(prev => ({
+        ...prev,
+        customParameters: currentData.customParameters
+      }));
     } else {
-      setCustomParameters(prev => {
-        const updated = [...prev, customParam];
-        setTimeout(() => saveGamePlan(), 500);
-        return updated;
-      });
+      // Personal plan
+      const gamePlanRef = doc(db, 'gamePlans', `${user.uid}_${selectedYear}_${selectedMonth}`);
+      const currentDoc = await getDoc(gamePlanRef);
+      const currentData = currentDoc.exists() ? currentDoc.data() : { customParameters: [] };
+      
+      currentData.customParameters = [...(currentData.customParameters || []), customParam];
+      currentData.lastUpdated = new Date();
+      
+      await setDoc(gamePlanRef, currentData, { merge: true });
+      setCustomParameters(currentData.customParameters);
     }
     
     setNewCustomParam({ name: '', target: 0, unit: '' });
-  };
-
-  const updateWeeklyProgress = async (week, paramId, value) => {
-    if (isReadOnly) return;
     
+  } catch (error) {
+    console.error('Error adding custom parameter:', error);
+  } finally {
+    setTimeout(() => setIsEditing(false), 1000);
+  }
+};
+
+ // Also update updateWeeklyProgress to use direct saves:
+const updateWeeklyProgress = async (week, paramId, value) => {
+  if (isReadOnly) return;
+  
+  setIsEditing(true);
+  
+  try {
     if (selectedDownline && canEditDownlineData()) {
-      setViewingDownlineData(prev => {
-        if (!prev) return prev;
-        const updated = {
-          ...prev,
-          weeklyProgress: {
-            ...prev.weeklyProgress,
-            [week]: {
-              ...prev.weeklyProgress[week],
-              [paramId]: Number(value) || 0
-            }
-          }
-        };
-        setTimeout(() => saveGamePlan(selectedDownline.id), 500);
-        return updated;
-      });
+      // Handle downline editing with direct Firestore approach
+      const gamePlanRef = selectedDownline.partnerId 
+        ? doc(db, 'sharedGamePlans', `shared_${[selectedDownline.id, selectedDownline.partnerId].sort().join('_')}_${selectedYear}_${selectedMonth}`)
+        : doc(db, 'gamePlans', `${selectedDownline.id}_${selectedYear}_${selectedMonth}`);
+      
+      const currentDoc = await getDoc(gamePlanRef);
+      const currentData = currentDoc.exists() ? currentDoc.data() : {
+        monthlyGoals: defaultParameters,
+        customParameters: [],
+        weeklyProgress: { week1: {}, week2: {}, week3: {}, week4: {} }
+      };
+      
+      // Update weekly progress
+      if (!currentData.weeklyProgress) currentData.weeklyProgress = {};
+      if (!currentData.weeklyProgress[week]) currentData.weeklyProgress[week] = {};
+      currentData.weeklyProgress[week][paramId] = Number(value) || 0;
+      
+      currentData.lastUpdated = new Date();
+      currentData.lastUpdatedBy = user.uid;
+      currentData.lastUpdatedByName = user.displayName || user.name;
+      
+      await setDoc(gamePlanRef, currentData);
+      
+      // Update viewingDownlineData to match
+      setViewingDownlineData(prev => ({
+        ...prev,
+        weeklyProgress: currentData.weeklyProgress
+      }));
+      
     } else {
-      setWeeklyProgress(prev => {
-        const updated = {
-          ...prev,
-          [week]: {
-            ...prev[week],
-            [paramId]: Number(value) || 0
-          }
-        };
-        setTimeout(() => saveGamePlan(), 500);
-        return updated;
-      });
+      // Personal plan - direct Firestore update
+      const gamePlanRef = doc(db, 'gamePlans', `${user.uid}_${selectedYear}_${selectedMonth}`);
+      
+      const currentDoc = await getDoc(gamePlanRef);
+      const currentData = currentDoc.exists() ? currentDoc.data() : {
+        monthlyGoals: defaultParameters,
+        customParameters: [],
+        weeklyProgress: { week1: {}, week2: {}, week3: {}, week4: {} },
+        userId: user.uid,
+        month: selectedMonth,
+        year: selectedYear
+      };
+      
+      // Update weekly progress
+      if (!currentData.weeklyProgress) currentData.weeklyProgress = {};
+      if (!currentData.weeklyProgress[week]) currentData.weeklyProgress[week] = {};
+      currentData.weeklyProgress[week][paramId] = Number(value) || 0;
+      
+      currentData.lastUpdated = new Date();
+      
+      await setDoc(gamePlanRef, currentData);
+      
+      // Update React state to match
+      setWeeklyProgress(currentData.weeklyProgress);
     }
-  };
+    
+    console.log('✅ Weekly progress updated directly');
+    
+  } catch (error) {
+    console.error('❌ Weekly progress update faailed:', error);
+  } finally {
+    setTimeout(() => setIsEditing(false), 1000);
+  }
+};
 
   const toggleUplineSelection = async (uplineId) => {
     const newSelectedUplines = selectedUplines.includes(uplineId)
@@ -975,29 +1075,93 @@ const debouncedSave = useCallback(
         )}
 
         {/* Permission Banners */}
-        {selectedDownline && !canEditDownlineData() && (
-          <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-            <p className="text-sm text-yellow-800">
-              <span className="font-medium">View Only:</span> You can view this user's game plan but cannot make changes.
-            </p>
-          </div>
-        )}
+        
+        {/* Shared Game Plan - Edit Available Banner */}
+          {selectedDownline && canEditDownlineData() && !editMode && viewingDownlineData?.hasPartner && (
+            <div className="mt-4 bg-purple-50 border border-purple-200 rounded-lg p-3">
+              <p className="text-sm text-purple-800">
+                <span className="font-medium">Shared Plan - Edit Available:</span> You can edit this shared game plan between{' '}
+                <strong>{selectedDownline.displayName || selectedDownline.name}</strong> and{' '}
+                <strong>{viewingDownlineData.partnerInfo?.name}</strong>. 
+                Click "Edit Mode" to make changes that will affect both partners.
+              </p>
+            </div>
+          )}
 
-        {selectedDownline && canEditDownlineData() && !editMode && (
-          <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
-            <p className="text-sm text-blue-800">
-              <span className="font-medium">Edit Available:</span> You have permission to edit this user's game plan. Click "Edit Mode" to enable editing.
-            </p>
-          </div>
-        )}
+          {/* Shared Game Plan - Edit Mode Active Banner */}
+          {selectedDownline && editMode && viewingDownlineData?.hasPartner && (
+            <div className="mt-4 bg-purple-100 border border-purple-300 rounded-lg p-3">
+              <p className="text-sm text-purple-800">
+                <span className="font-medium">Editing Shared Plan:</span> You are editing the shared game plan for{' '}
+                <strong>{selectedDownline.displayName || selectedDownline.name}</strong> and{' '}
+                <strong>{viewingDownlineData.partnerInfo?.name}</strong>. 
+                Changes will be visible to both partners and auto-saved.
+              </p>
+            </div>
+          )}
 
-        {selectedDownline && editMode && (
-          <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-3">
-            <p className="text-sm text-green-800">
-              <span className="font-medium">Edit Mode Active:</span> You are currently editing {selectedDownline.displayName || selectedDownline.name}'s game plan. Changes are auto-saved.
-            </p>
-          </div>
-        )}
+          {/* Shared Game Plan - View Only Banner */}
+          {selectedDownline && !canEditDownlineData() && viewingDownlineData?.hasPartner && (
+            <div className="mt-4 bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+              <p className="text-sm text-indigo-800">
+                <span className="font-medium">Shared Plan - View Only:</span> You can view this shared game plan between{' '}
+                <strong>{selectedDownline.displayName || selectedDownline.name}</strong> and{' '}
+                <strong>{viewingDownlineData.partnerInfo?.name}</strong>, but cannot make changes.
+              </p>
+            </div>
+          )}
+
+          {/* Partnership Information Banner - Always visible when viewing shared plan */}
+          {selectedDownline && viewingDownlineData?.hasPartner && (
+            <div className="mt-4 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Users size={16} className="text-white" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="font-semibold text-purple-800 mb-2">Partnership Game Plan</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <div className="bg-white/50 rounded-lg p-3 border border-purple-200/50">
+                      <div className="font-medium text-purple-700">Partner 1</div>
+                      <div className="text-purple-800">{selectedDownline.displayName || selectedDownline.name}</div>
+                      <div className="text-xs text-purple-600">Downline Member</div>
+                    </div>
+                    <div className="bg-white/50 rounded-lg p-3 border border-purple-200/50">
+                      <div className="font-medium text-purple-700">Partner 2</div>
+                      <div className="text-purple-800">{viewingDownlineData.partnerInfo?.name}</div>
+                      <div className="text-xs text-purple-600">Partner</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 p-2 bg-purple-100/50 rounded border border-purple-200/50">
+                    <p className="text-xs text-purple-700">
+                      <strong>Note:</strong> This shared game plan combines goals and progress from both partners. 
+                      All updates are synchronized and visible to both team members.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Last Updated Information for Shared Plans */}
+          {selectedDownline && viewingDownlineData?.hasPartner && viewingDownlineData?.lastUpdatedBy && (
+            <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3">
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <div className="w-4 h-4 bg-gray-400 rounded-full flex items-center justify-center">
+                  <div className="w-2 h-2 bg-white rounded-full"></div>
+                </div>
+                <span>
+                  Shared plan last updated by{' '}
+                  <strong className="text-gray-800">{viewingDownlineData.lastUpdatedByName || 'Unknown'}</strong>{' '}
+                  on{' '}
+                  <strong className="text-gray-800">
+                    {new Date(viewingDownlineData.lastUpdated?.toDate?.() || viewingDownlineData.lastUpdated).toLocaleDateString()}
+                  </strong>
+                </span>
+              </div>
+            </div>
+          )}
+        
       </div>
 
       {/* Navigation Tabs */}
@@ -1266,8 +1430,7 @@ const debouncedSave = useCallback(
                     </div>
                     <div>
                       <div className="font-semibold text-gray-800">{selectedPartner.displayName || selectedPartner.name}</div>
-                      <div className="text-sm text-gray-600">{selectedPartner.email}</div>
-                      <div className="text-xs text-purple-600 font-medium">Game Planning Partner</div>
+                     <div className="text-xs text-purple-600 font-medium">Game Planning Partner</div>
                     </div>
                   </div>
                   <button type="button"
@@ -1330,7 +1493,7 @@ const debouncedSave = useCallback(
                       </div>
                       <div>
                         <div className="font-semibold text-gray-800">{user.name}</div>
-                        <div className="text-sm text-gray-600">{user.email}</div>
+                        {/* Removed email line: <div className="text-sm text-gray-600">{user.email}</div> */}
                       </div>
                     </div>
                     <button type="button"
@@ -1377,39 +1540,39 @@ const debouncedSave = useCallback(
           <div className="mb-6">
             <h3 className="text-base sm:text-lg font-semibold text-gray-700 mb-4">Your Uplines</h3>
             {selectedUplines.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                {selectedUplines.map(uplineId => {
-                  const upline = availableUplines.find(u => u.id === uplineId);
-                  return upline ? (
-                    <div key={upline.id} className="border border-gray-200 rounded-lg p-3 sm:p-4 bg-green-50">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 sm:w-10 h-8 sm:h-10 bg-green-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-                            {upline.name.split(' ').map(n => n[0]).join('')}
-                          </div>
-                          <div>
-                            <div className="font-semibold text-gray-800 text-sm sm:text-base">{upline.name}</div>
-                            <div className="text-xs sm:text-sm text-gray-600">{upline.role}</div>
-                            <div className="text-xs text-gray-500">{upline.email}</div>
-                          </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              {selectedUplines.map(uplineId => {
+                const upline = availableUplines.find(u => u.id === uplineId);
+                return upline ? (
+                  <div key={upline.id} className="border border-gray-200 rounded-lg p-3 sm:p-4 bg-green-50">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 sm:w-10 h-8 sm:h-10 bg-green-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                          {upline.name.split(' ').map(n => n[0]).join('')}
                         </div>
-                       <button
-                            type="button"
-                            onClick={() => {
-                              setUplineToRemove(upline);
-                              setShowRemoveUplineModal(true);
-                            }}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors text-xs sm:text-sm"
-                            title="Remove upline"
-                          >
-                            Remove
-                          </button>
+                        <div>
+                          <div className="font-semibold text-gray-800 text-sm sm:text-base">{upline.name}</div>
+                          <div className="text-xs sm:text-sm text-gray-600">{upline.role}</div>
+                          {/* Removed email line: <div className="text-xs text-gray-500">{upline.email}</div> */}
+                        </div>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUplineToRemove(upline);
+                          setShowRemoveUplineModal(true);
+                        }}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors text-xs sm:text-sm"
+                        title="Remove upline"
+                      >
+                        Remove
+                      </button>
                     </div>
-                  ) : null;
-                })}
-              </div>
-            ) : (
+                  </div>
+                ) : null;
+              })}
+            </div>
+          ) : (
               <div className="text-center py-6 sm:py-8 text-gray-500">
                 <Users size={40} className="mx-auto mb-4 text-gray-300" />
                 <p className="text-sm sm:text-base">No uplines selected. Choose uplines to enable game planning visibility.</p>
@@ -1419,36 +1582,36 @@ const debouncedSave = useCallback(
 
           {/* Upline Selector */}
           {showUplineSelector && (
-            <div className="border border-gray-200 rounded-lg p-3 sm:p-4 bg-gray-50">
-              <h3 className="text-base sm:text-lg font-semibold text-gray-700 mb-4">Available Uplines</h3>
-              <div className="space-y-3">
-                {availableUplines.map(upline => (
-                  <div key={upline.id} className="flex items-center justify-between p-3 bg-white rounded-lg border">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 sm:w-10 h-8 sm:h-10 bg-gray-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-                        {upline.name.split(' ').map(n => n[0]).join('')}
-                      </div>
-                      <div>
-                        <div className="font-semibold text-gray-800 text-sm sm:text-base">{upline.name}</div>
-                        <div className="text-xs sm:text-sm text-gray-600">{upline.role}</div>
-                        <div className="text-xs text-gray-500">{upline.email}</div>
-                      </div>
-                    </div> 
-                    <button type="button"
-                      onClick={() => toggleUplineSelection(upline.id)}
-                      className={`px-3 sm:px-4 py-2 rounded-lg transition-colors text-xs sm:text-sm ${
-                        selectedUplines.includes(upline.id)
-                          ? 'bg-green-600 text-white hover:bg-green-700'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                      }`}
-                    >
-                      {selectedUplines.includes(upline.id) ? 'Selected' : 'Select'}
-                    </button>
-                  </div>
-                ))}
-              </div>
+          <div className="border border-gray-200 rounded-lg p-3 sm:p-4 bg-gray-50">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-700 mb-4">Available Uplines</h3>
+            <div className="space-y-3">
+              {availableUplines.map(upline => (
+                <div key={upline.id} className="flex items-center justify-between p-3 bg-white rounded-lg border">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 sm:w-10 h-8 sm:h-10 bg-gray-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                      {upline.name.split(' ').map(n => n[0]).join('')}
+                    </div>
+                    <div>
+                      <div className="font-semibold text-gray-800 text-sm sm:text-base">{upline.name}</div>
+                      <div className="text-xs sm:text-sm text-gray-600">{upline.role}</div>
+                      {/* Removed email line: <div className="text-xs text-gray-500">{upline.email}</div> */}
+                    </div>
+                  </div> 
+                  <button type="button"
+                    onClick={() => toggleUplineSelection(upline.id)}
+                    className={`px-3 sm:px-4 py-2 rounded-lg transition-colors text-xs sm:text-sm ${
+                      selectedUplines.includes(upline.id)
+                        ? 'bg-green-600 text-white hover:bg-green-700'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    {selectedUplines.includes(upline.id) ? 'Selected' : 'Select'}
+                  </button>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
+        )}
 
           {/* Permissions Info */}
           <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
@@ -1475,7 +1638,7 @@ const debouncedSave = useCallback(
 
           <div className="mb-6">
             <h3 className="text-base sm:text-lg font-semibold text-gray-700 mb-4">Selected Uplines</h3>
-            {selectedDownline.selectedUplines && selectedDownline.selectedUplines.length > 0 ? (
+              {selectedDownline.selectedUplines && selectedDownline.selectedUplines.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 {selectedDownline.selectedUplines.map(uplineId => {
                   const upline = availableUplines.find(u => u.id === uplineId);
@@ -1488,7 +1651,7 @@ const debouncedSave = useCallback(
                         <div>
                           <div className="font-semibold text-gray-800 text-sm sm:text-base">{upline.name}</div>
                           <div className="text-xs sm:text-sm text-gray-600">{upline.role}</div>
-                          <div className="text-xs text-gray-500">{upline.email}</div>
+                          {/* Removed email line: <div className="text-xs text-gray-500">{upline.email}</div> */}
                           {upline.id === user.uid && (
                             <div className="text-xs text-green-600 font-medium">You</div>
                           )}

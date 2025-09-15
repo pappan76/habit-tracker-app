@@ -7,6 +7,8 @@ import './styles/responsive.css';
 import './styles/mobile.css';
 import { updateHabitNames } from './utils/updateHabits';
 import MainApp from './components/MainApp';
+import InventoryPage from './components/InventoryPage';
+
 
 
 function App() {

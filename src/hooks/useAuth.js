@@ -1,6 +1,6 @@
 // src/hooks/useAuth.js
 import { useState, useEffect } from "react";
-import { auth, db } from "../firebase"; // Make sure db is exported from your firebase config
+import { auth, db } from "../firebase";
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -15,6 +15,7 @@ const provider = new GoogleAuthProvider();
 
 export function useAuth() {
   const [user, setUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSigningIn, setIsSigningIn] = useState(false);
 
@@ -25,13 +26,82 @@ export function useAuth() {
     ) || window.innerWidth <= 768;
   };
 
+  // Ensure user document exists with all required fields for game planning
+  const ensureUserDocumentExists = async (user) => {
+    if (!user?.uid) return null;
+    
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const userDoc = await getDoc(userRef);
+      
+      let userData;
+      
+      if (!userDoc.exists()) {
+        // Create new user document with all required fields
+        userData = {
+          uid: user.uid,
+          email: user.email || "",
+          displayName: user.displayName || "",
+          name: user.displayName || user.name || "",
+          photoURL: user.photoURL || "",
+          // Game planning specific fields
+          selectedUplines: [],
+          partnerId: null,
+          role: "User",
+          isActive: true,
+          // Timestamps
+          createdAt: new Date(),
+          lastLogin: new Date(),
+          lastUpdated: new Date()
+        };
+        
+        await setDoc(userRef, userData);
+        console.log("User document created with game planning fields:", user.uid);
+        
+        return userData;
+      } else {
+        // Update existing document to ensure all required fields exist
+        const existingData = userDoc.data();
+        
+        const updatedData = {
+          // Preserve existing data
+          ...existingData,
+          // Ensure auth fields are current
+          email: user.email || existingData.email || "",
+          displayName: user.displayName || existingData.displayName || "",
+          name: user.displayName || user.name || existingData.name || "",
+          photoURL: user.photoURL || existingData.photoURL || "",
+          // Ensure game planning fields exist with defaults
+          selectedUplines: existingData.selectedUplines || [],
+          partnerId: existingData.partnerId || null,
+          role: existingData.role || "User",
+          isActive: existingData.isActive !== undefined ? existingData.isActive : true,
+          // Update timestamps
+          lastLogin: new Date(),
+          lastUpdated: new Date(),
+          // Preserve creation date
+          createdAt: existingData.createdAt || new Date()
+        };
+        
+        await setDoc(userRef, updatedData, { merge: true });
+        console.log("User document updated with required fields:", user.uid);
+        
+        return updatedData;
+      }
+    } catch (error) {
+      console.error("Error ensuring user document exists:", error);
+      return null;
+    }
+  };
+
   useEffect(() => {
     // Handle redirect result (mobile login)
     getRedirectResult(auth)
-      .then((result) => {
+      .then(async (result) => {
         if (result?.user) {
           console.log("Logged in with redirect:", result.user);
-          saveUserToFirestore(result.user);
+          const userData = await ensureUserDocumentExists(result.user);
+          setUserProfile(userData);
         }
       })
       .catch((error) => {
@@ -42,43 +112,26 @@ export function useAuth() {
       });
 
     // Listen to authentication state changes
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
+      
+      if (user) {
+        // Ensure user document exists and get the complete profile
+        const userData = await ensureUserDocumentExists(user);
+        setUserProfile(userData);
+      } else {
+        setUserProfile(null);
+      }
+      
       setIsLoading(false);
     });
 
     return unsubscribe;
   }, []);
 
-  // Save user details in Firestore
+  // Legacy function maintained for backward compatibility
   const saveUserToFirestore = async (user) => {
-    try {
-      console.log("💾 Saving user details:", user);
-      
-      // Check if user already exists to preserve creation date
-      const userRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
-      const existingData = userSnap.exists() ? userSnap.data() : {};
-      
-      await setDoc(
-        userRef,
-        {
-          uid: user.uid,
-          name: user.displayName || "",
-          email: user.email || "",
-          photoURL: user.photoURL || "",
-          createdAt: existingData.createdAt || new Date(), // Preserve original creation date
-          lastLogin: new Date(), // Update last login
-          isActive: true,
-        },
-        { merge: true } // Update if already exists
-      );
-      
-      console.log("✅ User saved successfully to Firestore");
-    } catch (error) {
-      console.error("❌ Error saving user:", error);
-      throw error;
-    }
+    return await ensureUserDocumentExists(user);
   };
 
   const signInWithGoogle = async () => {
@@ -87,17 +140,19 @@ export function useAuth() {
     try {
       if (isMobile()) {
         // Mobile → use redirect
-        console.log("📱 Using redirect flow for mobile");
+        console.log("Using redirect flow for mobile");
         await signInWithRedirect(auth, provider);
-        // Note: saveUserToFirestore will be called in useEffect after redirect
+        // Note: ensureUserDocumentExists will be called in useEffect after redirect
       } else {
         // Desktop → use popup
-        console.log("🖥️ Using popup flow for desktop");
+        console.log("Using popup flow for desktop");
         const result = await signInWithPopup(auth, provider);
         console.log("Logged in with popup:", result.user);
         
-        // Save user after successful popup login
-        await saveUserToFirestore(result.user);
+        // Ensure user document exists after successful popup login
+        const userData = await ensureUserDocumentExists(result.user);
+        setUserProfile(userData);
+        
         return result.user;
       }
     } catch (error) {
@@ -119,9 +174,10 @@ export function useAuth() {
   const signOut = async () => {
     try {
       await firebaseSignOut(auth);
-      console.log("✅ User signed out successfully");
+      setUserProfile(null);
+      console.log("User signed out successfully");
     } catch (error) {
-      console.error("❌ Error signing out:", error);
+      console.error("Error signing out:", error);
       throw error;
     }
   };
@@ -133,14 +189,20 @@ export function useAuth() {
 
     try {
       const userRef = doc(db, "users", user.uid);
-      await setDoc(userRef, {
+      const updatedData = {
         ...updates,
         lastUpdated: new Date(),
-      }, { merge: true });
+      };
       
-      console.log("✅ User profile updated successfully");
+      await setDoc(userRef, updatedData, { merge: true });
+      
+      // Update local profile state
+      setUserProfile(prev => ({ ...prev, ...updatedData }));
+      
+      console.log("User profile updated successfully");
+      return updatedData;
     } catch (error) {
-      console.error("❌ Error updating user profile:", error);
+      console.error("Error updating user profile:", error);
       throw error;
     }
   };
@@ -161,8 +223,22 @@ export function useAuth() {
         return null;
       }
     } catch (error) {
-      console.error("❌ Error getting user data:", error);
+      console.error("Error getting user data:", error);
       throw error;
+    }
+  };
+
+  // Refresh user profile from Firestore
+  const refreshUserProfile = async () => {
+    if (!user?.uid) return null;
+    
+    try {
+      const userData = await getUserData(user.uid);
+      setUserProfile(userData);
+      return userData;
+    } catch (error) {
+      console.error("Error refreshing user profile:", error);
+      return null;
     }
   };
 
@@ -181,6 +257,26 @@ export function useAuth() {
     return true;
   };
 
+  // Game planning specific helper methods
+  const hasPartner = () => {
+    return userProfile?.partnerId != null;
+  };
+
+  const getPartnerInfo = async () => {
+    if (!hasPartner()) return null;
+    
+    try {
+      return await getUserData(userProfile.partnerId);
+    } catch (error) {
+      console.error("Error getting partner info:", error);
+      return null;
+    }
+  };
+
+  const getUplines = () => {
+    return userProfile?.selectedUplines || [];
+  };
+
   // Return all the functions and state
   return {
     // State
@@ -196,9 +292,16 @@ export function useAuth() {
     signOut,
     
     // User data methods
-    saveUserToFirestore,
+    saveUserToFirestore, // Legacy - now calls ensureUserDocumentExists
+    ensureUserDocumentExists,
     updateUserProfile,
     getUserData,
+    refreshUserProfile,
+    
+    // Game planning specific methods
+    hasPartner,
+    getPartnerInfo,
+    getUplines,
     
     // Admin methods
     checkIsAdmin,
