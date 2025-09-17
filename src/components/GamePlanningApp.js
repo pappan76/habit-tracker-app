@@ -837,38 +837,63 @@ const updateWeeklyProgress = async (week, paramId, value) => {
         ...prev,
         weeklyProgress: currentData.weeklyProgress
       }));
-      
+      console.log('✅ Weekly progress updated in downline plan');
+
     } else {
-      // Personal plan - direct Firestore update
-      const gamePlanRef = doc(db, 'gamePlans', `${user.uid}_${selectedYear}_${selectedMonth}`);
+      // Personal plan - direct Firestore update or shared plan update if applicable
+      // check if user has a partner and if so, update shared plan
+      // if not, update personal plan
+      if (isSharedPlan && sharedPlanId) {
+        const sharedGamePlanRef = doc(db, 'sharedGamePlans', sharedPlanId);
+        const sharedDoc = await getDoc(sharedGamePlanRef);
+        const sharedData = sharedDoc.exists() ? sharedDoc.data() : {
+          monthlyGoals: defaultParameters,
+          customParameters: [],
+          weeklyProgress: { week1: {}, week2: {}, week3: {}, week4: {} }
+        };
+        
+        if (!sharedData.weeklyProgress) sharedData.weeklyProgress = {};
+        if (!sharedData.weeklyProgress[week]) sharedData.weeklyProgress[week] = {};
+        sharedData.weeklyProgress[week][paramId] = Number(value) || 0;
+        
+        sharedData.lastUpdated = new Date();
+        
+        await setDoc(sharedGamePlanRef, sharedData);
+        
+        // Update React state to match
+        setWeeklyProgress(sharedData.weeklyProgress);
+        console.log('✅ Weekly progress updated in shared plan');
+        
+      } else {
+        // No partner - update personal plan
+        // Personal plan
+        const gamePlanRef = doc(db, 'gamePlans', `${user.uid}_${selectedYear}_${selectedMonth}`);
       
-      const currentDoc = await getDoc(gamePlanRef);
-      const currentData = currentDoc.exists() ? currentDoc.data() : {
+        const currentDoc = await getDoc(gamePlanRef);
+        const currentData = currentDoc.exists() ? currentDoc.data() : {
         monthlyGoals: defaultParameters,
         customParameters: [],
         weeklyProgress: { week1: {}, week2: {}, week3: {}, week4: {} },
         userId: user.uid,
         month: selectedMonth,
         year: selectedYear
-      };
+        };
+        // Update weekly progress
+        if (!currentData.weeklyProgress) currentData.weeklyProgress = {};
+        if (!currentData.weeklyProgress[week]) currentData.weeklyProgress[week] = {};
+        currentData.weeklyProgress[week][paramId] = Number(value) || 0;
+        
+        currentData.lastUpdated = new Date();
+        
+        await setDoc(gamePlanRef, currentData);
       
-      // Update weekly progress
-      if (!currentData.weeklyProgress) currentData.weeklyProgress = {};
-      if (!currentData.weeklyProgress[week]) currentData.weeklyProgress[week] = {};
-      currentData.weeklyProgress[week][paramId] = Number(value) || 0;
-      
-      currentData.lastUpdated = new Date();
-      
-      await setDoc(gamePlanRef, currentData);
-      
-      // Update React state to match
-      setWeeklyProgress(currentData.weeklyProgress);
+        // Update React state to match
+        setWeeklyProgress(currentData.weeklyProgress);
+        console.log('✅ Weekly progress personal plan updated directly');
+      }     
     }
-    
-    console.log('✅ Weekly progress updated directly');
-    
   } catch (error) {
-    console.error('❌ Weekly progress update faailed:', error);
+    console.error('❌ Weekly progress update failed:', error);
   } finally {
     setTimeout(() => setIsEditing(false), 1000);
   }

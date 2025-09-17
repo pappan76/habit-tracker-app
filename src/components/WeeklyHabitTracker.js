@@ -14,6 +14,7 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth, db } from '../services/firebase';
 import CustomHabitsModal from './CustomHabitsModal';
 
+
 const getLeadershipGoalProgress = (habit, habitValues) => {
   if (habit.name !== 'Process Appointments') return null;
   
@@ -391,7 +392,7 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
           className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center text-sm"
         >
           <span className="mr-2">⭐</span>
-          Add Custom Habit
+          Add Custom Habit {formatDateString(new Date())} 
         </button>
       </div>
 
@@ -486,8 +487,9 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
                               isToday(date) 
                                 ? 'text-white bg-blue-600 font-bold px-2 py-1 rounded-full border-2 border-blue-600' 
                                 : 'text-gray-500'
-                            }`}>
-                              {date.getDate()}
+                            }`}                                                                                                      
+                            >
+                            {date.getDate()}
                             </div>
                             {isToday(date) && (
                               <div className="w-2 h-2 bg-blue-600 rounded-full mx-auto mt-1 animate-pulse"></div>
@@ -715,7 +717,8 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
                             const isCompleted = completedHabits[key];
                             const isDateToday = isToday(date);
                             const currentValue = habitValues[key] || 0;
-                            
+                            console.log('Custom Habit Value:', isDateToday, date, isToday(date));
+
                             return (
                               <td key={dateString} className="p-2 sm:p-4 text-center min-w-[60px]">
                                 {habit.type === 'number' ? (
