@@ -295,12 +295,7 @@ const HabitTrackerApp = () => {
                   <div className="max-w-6xl mx-auto">
                     {/* Page Header */}
                     <div className="mb-6">
-                      <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">
-                        Game Planning Session
-                      </h2>
-                      <p className="text-sm sm:text-base text-gray-600">
-                        Set monthly goals, track weekly progress, and manage upline relationships
-                      </p>
+                      
                     </div>
 
                     {/* Game Planning Component */}
