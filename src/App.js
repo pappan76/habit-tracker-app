@@ -6,13 +6,11 @@ import './App.css';
 import './styles/responsive.css';
 import './styles/mobile.css';
 import { updateHabitNames } from './utils/updateHabits';
-import MainApp from './components/MainApp';
 import InventoryPage from './components/InventoryPage';
 
 
-
 function App() {
-  const { user, loading } = useAuth();
+  const { user, userProfile, loading } = useAuth();
 
   // Run migration when user is authenticated
   useEffect(() => {
@@ -49,11 +47,11 @@ function App() {
     );
   }
 
-  return (
-    <div className="App">
-      {user ? <MainApp user={user} /> : <Login />}
-    </div>
-  );
+return (
+  <div className="App">
+    {user ? <MainApp user={userProfile || user} /> : <Login />}
+  </div>
+);
 }
 
 export default App;

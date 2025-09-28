@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth, db } from '../services/firebase';
 
@@ -7,8 +7,10 @@ const PredefinedHabits = ({ onHabitAdded }) => {
   const [user] = useAuthState(auth);
   const [selectedHabits, setSelectedHabits] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [existingHabits, setExistingHabits] = useState([]);
+  const [isChecking, setIsChecking] = useState(true);
 
-  const predefinedHabits = [
+const predefinedHabits = [
     {
       id: 'book',
       name: 'Book',
@@ -88,6 +90,37 @@ const PredefinedHabits = ({ onHabitAdded }) => {
       defaultTarget: 5
     }
   ];
+  
+  // Fetch existing habits when component mounts
+  useEffect(() => {
+    const fetchExistingHabits = async () => {
+      if (!user) return;
+      
+      setIsChecking(true);
+      try {
+        const habitsRef = collection(db, 'habits');
+        const q = query(habitsRef, where('userId', '==', user.uid));
+        const querySnapshot = await getDocs(q);
+        
+        const existingHabitNames = querySnapshot.docs.map(doc => doc.data().name);
+        setExistingHabits(existingHabitNames);
+      } catch (error) {
+        console.error('Error fetching existing habits:', error);
+      } finally {
+        setIsChecking(false);
+      }
+    };
+
+    fetchExistingHabits();
+  }, [user]);
+
+  const isHabitAlreadyAdded = (habit) => {
+    return existingHabits.includes(habit.name);
+  };
+
+  const getAvailableHabits = () => {
+    return predefinedHabits.filter(habit => !isHabitAlreadyAdded(habit));
+  };
 
   const toggleHabitSelection = (habitId) => {
     setSelectedHabits(prev => 
@@ -104,7 +137,7 @@ const PredefinedHabits = ({ onHabitAdded }) => {
     
     try {
       const habitsToAdd = predefinedHabits.filter(habit => 
-        selectedHabits.includes(habit.id)
+        selectedHabits.includes(habit.id) && !isHabitAlreadyAdded(habit)
       );
 
       const promises = habitsToAdd.map(habit => 
@@ -129,7 +162,10 @@ const PredefinedHabits = ({ onHabitAdded }) => {
 
       await Promise.all(promises);
       
-      alert(`Successfully added ${selectedHabits.length} habits!`);
+      // Update existing habits after adding new ones
+      setExistingHabits(prev => [...prev, ...habitsToAdd.map(h => h.name)]);
+      
+      alert(`Successfully added ${habitsToAdd.length} habits!`);
       setSelectedHabits([]);
       onHabitAdded && onHabitAdded();
     } catch (error) {
@@ -144,6 +180,31 @@ const PredefinedHabits = ({ onHabitAdded }) => {
     return (
       <div className="text-center p-6">
         <p className="text-gray-600">Please sign in to add habits.</p>
+      </div>
+    );
+  }
+
+  if (isChecking) {
+    return (
+      <div className="text-center p-6">
+        <p className="text-gray-600">Checking existing habits...</p>
+      </div>
+    );
+  }
+
+  const availableHabits = getAvailableHabits();
+
+  if (availableHabits.length === 0) {
+    return (
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+          <h3 className="font-semibold text-green-800 mb-2">
+            ✨ All Predefined Habits Added!
+          </h3>
+          <p className="text-green-700">
+            You've already added all the predefined habits. Great job on taking the first step towards building these habits!
+          </p>
+        </div>
       </div>
     );
   }
@@ -164,7 +225,7 @@ const PredefinedHabits = ({ onHabitAdded }) => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-        {predefinedHabits.map((habit) => (
+        {availableHabits.map((habit) => (
           <div
             key={habit.id}
             className={`border rounded-lg p-4 cursor-pointer transition-all duration-200 ${
@@ -218,6 +279,27 @@ const PredefinedHabits = ({ onHabitAdded }) => {
                   className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm"
                 >
                   {habit.icon} {habit.name}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {existingHabits.length > 0 && (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+          <h3 className="font-semibold text-gray-800 mb-2">
+            Already Added Habits ({existingHabits.length})
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {existingHabits.map(habitName => {
+              const habit = predefinedHabits.find(h => h.name === habitName);
+              return (
+                <span 
+                  key={habitName}
+                  className="bg-gray-200 text-gray-700 px-3 py-1 rounded-full text-sm"
+                >
+                  {habit?.icon || '✓'} {habitName}
                 </span>
               );
             })}

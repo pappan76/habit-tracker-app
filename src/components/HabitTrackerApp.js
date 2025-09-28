@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '../hooks/useAuth'; // <-- Import your custom hook
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
@@ -9,10 +10,15 @@ import Leaderboard from './Leaderboard';
 import UserProfileViewer from './UserProfileViewer';
 import GamePlanningApp from './GamePlanningApp';
 import ContactManagementPage from './ContactManagementPage';
+import AudioHabitCard from './AudioHabitCard';  
+import BudgetExpensesTracker from './BudgetExpensesTracker'; // New BudgetingApp component
+import InventoryPage from './InventoryPage'; // New InventoryPage component
+
 
 
 const HabitTrackerApp = () => {
   const [user] = useAuthState(auth);
+  const { ensureUserDocumentExists } = useAuth(); // <-- Get the function
   const [currentView, setCurrentView] = useState('dashboard');
   const [userHabits, setUserHabits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +54,12 @@ const HabitTrackerApp = () => {
       loadUserHabits();
     }
   }, [user, loadUserHabits]);
+
+   useEffect(() => {
+    if (user?.uid) {
+      ensureUserDocumentExists(user); // <-- Explicitly call it
+    }
+  }, [user, ensureUserDocumentExists]);
 
   const handleGoogleSignIn = async () => {
     setSigningIn(true);
@@ -156,6 +168,22 @@ const HabitTrackerApp = () => {
                   }`}
                 >
                   <span className="hidden sm:inline">📞 </span>Contacts
+                </button>
+                 <button
+                  onClick={() => setCurrentView('audio')}
+                  className={`px-2 sm:px-3 md:px-4 py-2 rounded-lg font-medium transition-colors text-xs sm:text-sm md:text-base whitespace-nowrap ${
+                    currentView === 'audio' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <span className="hidden sm:inline">🎙️ </span>Audio Habits
+                </button>
+                 <button
+                  onClick={() => setCurrentView('budgeting')}
+                  className={`px-2 sm:px-3 md:px-4 py-2 rounded-lg font-medium transition-colors text-xs sm:text-sm md:text-base whitespace-nowrap ${
+                    currentView === 'budgeting' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <span className="hidden sm:inline">💰 </span>Budgeting
                 </button>
               <button
                 onClick={() => setCurrentView('leaderboard')}
@@ -285,7 +313,28 @@ const HabitTrackerApp = () => {
             )}
           </div>
         )}
+        {currentView === 'audio' && (
+          <div className="max-w-7xl mx-auto">
+            <AudioHabitCard user={user} />
+          </div>
+        )}
+        {currentView === 'budgeting' && (
+          <div className="max-w-6xl mx-auto">
+            {/* Page Header */}
+            <div className="mb-6">
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">
+                Budgeting
+              </h2>
+              <p className="text-sm sm:text-base text-gray-600">
+                Manage your budget and expenses effectively.
+              </p>
+            </div>
 
+            {/* Budgeting Component */}
+            <BudgetExpensesTracker user={user} onRefreshData={loadUserHabits} />
+          </div>
+        )}
+                  
         {currentView === 'leaderboard' && (
           <div className="max-w-6xl mx-auto">
             <Leaderboard onViewUserProfile={handleViewUserProfile} />

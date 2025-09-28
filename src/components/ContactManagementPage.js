@@ -12,7 +12,7 @@ const ContactManagementPage = ({ user, onBack }) => {
   const [editingContactInline, setEditingContactInline] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterLocation, setFilterLocation] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('active');
   const [isLoading, setIsLoading] = useState(false);
   const [viewMode, setViewMode] = useState('cards'); // 'cards' or 'table'
   const [newContact, setNewContact] = useState({
@@ -35,9 +35,11 @@ const ContactManagementPage = ({ user, onBack }) => {
     { id: 'launch', name: 'Launch', description: 'Launch' }
   ];
 
-  // Status options
+  // Update the status options array
   const statusOptions = [
     { value: 'active', label: 'Active', color: 'bg-green-100 text-green-800', icon: '🟢' },
+    { value: 'launched', label: 'Launched', color: 'bg-blue-100 text-blue-800', icon: '🚀' },
+    { value: 'customer', label: 'Customer', color: 'bg-purple-100 text-purple-800', icon: '⭐' },
     { value: 'not_interested', label: 'Not Interested', color: 'bg-red-100 text-red-800', icon: '🔴' },
     { value: 'disappeared', label: 'Disappeared', color: 'bg-gray-100 text-gray-800', icon: '⚫' }
   ];
@@ -139,8 +141,12 @@ const ContactManagementPage = ({ user, onBack }) => {
             return completedSteps === 0;
           case 'in_progress':
             return completedSteps > 0 && completedSteps < pipelineSteps.length;
-          case 'launched':
-            return contact.pipeline?.launch?.completed;
+        case 'launched':
+            // Status is 'launched' OR all pipeline steps are completed
+            return (
+              contact.status === 'launched' ||
+              pipelineSteps.every(step => contact.pipeline?.[step.id]?.completed)
+            );
           case 'partner_contacts':
             return contact.isPartnerContact;
           case 'active':
@@ -332,7 +338,9 @@ const ContactManagementPage = ({ user, onBack }) => {
     const total = contacts.length;
     const userContacts = contacts.filter(c => !c.isPartnerContact).length;
     const partnerContacts = contacts.filter(c => c.isPartnerContact).length;
-    const launched = contacts.filter(c => 
+    
+    // Pipeline-based stats
+    const pipelineLaunched = contacts.filter(c => 
       c.pipeline?.launch?.completed
     ).length;
     const inProgress = contacts.filter(c => {
@@ -347,11 +355,27 @@ const ContactManagementPage = ({ user, onBack }) => {
       ).length;
       return completedSteps === 0;
     }).length;
+
+    // Status-based stats
     const active = contacts.filter(c => c.status === 'active' || !c.status).length;
+    const launched = contacts.filter(c => c.status === 'launched').length;
+    const customers = contacts.filter(c => c.status === 'customer').length;
     const notInterested = contacts.filter(c => c.status === 'not_interested').length;
     const disappeared = contacts.filter(c => c.status === 'disappeared').length;
 
-    return { total, userContacts, partnerContacts, launched, inProgress, notStarted, active, notInterested, disappeared };
+    return { 
+      total, 
+      userContacts, 
+      partnerContacts, 
+      pipelineLaunched,  // Pipeline completion
+      launched,          // Status-based launched
+      customers,         // New customer status
+      inProgress, 
+      notStarted, 
+      active, 
+      notInterested, 
+      disappeared 
+    };
   };
 
   const stats = getContactStats();
@@ -488,6 +512,16 @@ const ContactCard = ({ contact }) => {
           background: 'linear-gradient(to bottom right, #ecfdf5, #f0fdf4, #f0fdfa)',
           borderColor: '#bbf7d0'
         };
+      case 'launched':
+        return {
+          background: 'linear-gradient(to bottom right, #eff6ff, #e0f2fe, #dbeafe)',
+          borderColor: '#93c5fd'
+        };
+      case 'customer':
+        return {
+          background: 'linear-gradient(to bottom right, #f5f3ff, #ede9fe, #ddd6fe)',
+          borderColor: '#c4b5fd'
+        };
       case 'not_interested':
         return {
           background: 'linear-gradient(to bottom right, #fef2f2, #fff1f2, #fdf2f8)',
@@ -518,6 +552,10 @@ const ContactCard = ({ contact }) => {
     switch (contact.status || 'active') {
       case 'active':
         return 'shadow-green-100/50';
+      case 'launched':
+        return 'shadow-blue-100/50';
+      case 'customer':
+        return 'shadow-purple-100/50';
       case 'not_interested':
         return 'shadow-red-100/50';
       case 'disappeared':
@@ -857,32 +895,68 @@ const ContactCard = ({ contact }) => {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto p-3 sm:p-4 lg:p-6">
         {/* Summary Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-6 gap-2 sm:gap-3 lg:gap-4 mb-4 sm:mb-6">
-          <div className="bg-white rounded-lg shadow-sm border p-3 sm:p-4">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-blue-600">{stats.total}</div>
-            <div className="text-xs sm:text-sm text-gray-600">Total</div>
-          </div>
-          <div className="bg-white rounded-lg shadow-sm border p-3 sm:p-4">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-green-600">{stats.active}</div>
-            <div className="text-xs sm:text-sm text-gray-600">Active</div>
-          </div>
-          <div className="bg-white rounded-lg shadow-sm border p-3 sm:p-4">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-red-600">{stats.notInterested}</div>
-            <div className="text-xs sm:text-sm text-gray-600">Not Interested</div>
-          </div>
-          <div className="bg-white rounded-lg shadow-sm border p-3 sm:p-4">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-600">{stats.disappeared}</div>
-            <div className="text-xs sm:text-sm text-gray-600">Disappeared</div>
-          </div>
-          <div className="bg-white rounded-lg shadow-sm border p-3 sm:p-4">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-purple-600">{stats.partnerContacts}</div>
-            <div className="text-xs sm:text-sm text-gray-600">Partner</div>
-          </div>
-          <div className="bg-white rounded-lg shadow-sm border p-3 sm:p-4">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-orange-600">{stats.launched}</div>
-            <div className="text-xs sm:text-sm text-gray-600">Launched</div>
-          </div>
-        </div>
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-2 sm:gap-3 lg:gap-4 mb-4 sm:mb-6">
+        <button
+          type="button"
+          onClick={() => setFilterStatus('all')}
+          className={`bg-white rounded-lg shadow-sm border p-3 sm:p-4 transition-colors ${
+            filterStatus === 'all' ? 'ring-2 ring-blue-400' : ''
+          }`}
+        >
+          <div className="text-lg sm:text-xl lg:text-2xl font-bold text-blue-600">{stats.total}</div>
+          <div className="text-xs sm:text-sm text-gray-600">Total</div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterStatus('active')}
+          className={`bg-white rounded-lg shadow-sm border p-3 sm:p-4 transition-colors ${
+            filterStatus === 'active' ? 'ring-2 ring-green-400' : ''
+          }`}
+        >
+          <div className="text-lg sm:text-xl lg:text-2xl font-bold text-green-600">{stats.active}</div>
+          <div className="text-xs sm:text-sm text-gray-600">Active</div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterStatus('not_interested')}
+          className={`bg-white rounded-lg shadow-sm border p-3 sm:p-4 transition-colors ${
+            filterStatus === 'not_interested' ? 'ring-2 ring-red-400' : ''
+          }`}
+        >
+          <div className="text-lg sm:text-xl lg:text-2xl font-bold text-red-600">{stats.notInterested}</div>
+          <div className="text-xs sm:text-sm text-gray-600">Not Interested</div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterStatus('disappeared')}
+          className={`bg-white rounded-lg shadow-sm border p-3 sm:p-4 transition-colors ${
+            filterStatus === 'disappeared' ? 'ring-2 ring-gray-400' : ''
+          }`}
+        >
+          <div className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-600">{stats.disappeared}</div>
+          <div className="text-xs sm:text-sm text-gray-600">Disappeared</div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterStatus('partner_contacts')}
+          className={`bg-white rounded-lg shadow-sm border p-3 sm:p-4 transition-colors ${
+            filterStatus === 'partner_contacts' ? 'ring-2 ring-purple-400' : ''
+          }`}
+        >
+          <div className="text-lg sm:text-xl lg:text-2xl font-bold text-purple-600">{stats.partnerContacts}</div>
+          <div className="text-xs sm:text-sm text-gray-600">Partner</div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterStatus('launched')}
+          className={`bg-white rounded-lg shadow-sm border p-3 sm:p-4 transition-colors ${
+            filterStatus === 'launched' ? 'ring-2 ring-orange-400' : ''
+          }`}
+        >
+          <div className="text-lg sm:text-xl lg:text-2xl font-bold text-orange-600">{stats.launched}</div>
+          <div className="text-xs sm:text-sm text-gray-600">Launched</div>
+        </button>
+      </div>
 
         {/* Filters */}
         <div className="bg-white rounded-lg shadow-sm border p-3 sm:p-4 mb-4 sm:mb-6">
@@ -926,14 +1000,14 @@ const ContactCard = ({ contact }) => {
                   onChange={(e) => setFilterStatus(e.target.value)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                 >
-                  <option value="all">All Statuses</option>
                   <option value="active">🟢 Active</option>
+                  <option value="all">All Statuses</option>
                   <option value="not_interested">🔴 Not Interested</option>
                   <option value="disappeared">⚫ Disappeared</option>
-                  <option value="not_started">Not Started</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="launched">Launched</option>
-                  <option value="partner_contacts">Partner Contacts</option>
+                  <option value="not_started">⚪ Not Started</option>
+                  <option value="in_progress">🔵 In Progress</option>
+                  <option value="launched">🟠 Launched</option>
+                  <option value="partner_contacts">💜 Partner Contacts</option>
                 </select>
               </div>
             </div>

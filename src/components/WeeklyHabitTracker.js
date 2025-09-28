@@ -9,7 +9,7 @@ import {
   formatDateString,
   CUSTOM_WEEK_DAYS 
 } from '../utils/weekUtils';
-import { collection, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, updateDoc, doc,deleteDoc } from 'firebase/firestore';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth, db } from '../services/firebase';
 import CustomHabitsModal from './CustomHabitsModal';
@@ -62,8 +62,9 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
   const weekRange = getWeekRangeString(currentWeek);
 
   // Separate scoring and custom habits
-  const scoringHabits = habits.filter(habit => !habit.isCustom);
-  const customHabits = habits.filter(habit => habit.isCustom);
+const validHabits = habits.filter(habit => habit && habit.id && habit.name);
+const scoringHabits = validHabits.filter(habit => !habit.isCustom);
+const customHabits = validHabits.filter(habit => habit.isCustom);
 
   // Load weekly progress - memoized to prevent infinite re-renders
   const loadWeeklyProgress = useCallback(async () => {
@@ -205,8 +206,30 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
       console.error('Error updating habit:', error);
     }
   };
+// Add this function to the WeeklyHabitTracker component
+const deleteCustomHabit = async (habit) => {
+  if (!user || !habit || !habit.isCustom) return;
 
-  const toggleHabitCompletion = async (habit, date) => {
+  // Confirm deletion
+  if (!window.confirm(`Are you sure you want to delete the habit "${habit.name}"?`)) {
+    return;
+  }
+
+  try {
+    // Delete from Firestore
+    await deleteDoc(doc(db, 'habits', habit.id));
+    
+    // Optimistically update UI by filtering out this habit
+    onRefreshHabits && onRefreshHabits();
+    
+    // Show success message
+    alert(`Habit "${habit.name}" has been deleted.`);
+  } catch (error) {
+    console.error('Error deleting habit:', error);
+    alert('Failed to delete habit. Please try again.');
+  }
+};
+const toggleHabitCompletion = async (habit, date) => {
     if (!user || habit.type === 'number') return; // Don't use toggle for number habits
     
     const dateString = formatDateString(date);
@@ -392,7 +415,7 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
           className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center text-sm"
         >
           <span className="mr-2">⭐</span>
-          Add Custom Habit {formatDateString(new Date())} 
+          Add Custom Habit 
         </button>
       </div>
 
@@ -522,7 +545,9 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
                           </td>
                         </tr>
                       ) : (
-                        scoringHabits.map((habit) => (
+                         scoringHabits
+                        .filter(habit => habit && habit.id) // Add this filter to be extra safe
+                        .map((habit) => (
                           <tr key={habit.id} className="border-b last:border-b-0 hover:bg-gray-50">
                             <td className="p-2 sm:p-4 min-w-[200px]">
                               <div className="flex items-center">
@@ -690,24 +715,42 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
 
                     {/* Custom Habits Rows */}
                     <tbody>
-                      {customHabits.map((habit) => (
+                      {customHabits
+                      .filter(habit => habit && habit.id) // Add this filter 
+                      .map((habit) => (
                         <tr key={habit.id} className="border-b last:border-b-0 border-gray-300 hover:bg-gray-100">
                           <td className="p-2 sm:p-4 min-w-[200px]">
-                            <div className="flex items-center">
-                              <span className="text-lg sm:text-xl mr-2 sm:mr-3 opacity-70">{habit.icon}</span>
-                              <div>
-                                <div className="font-medium text-gray-700 text-xs sm:text-sm">
-                                  {habit.name}
-                                </div>
-                                <div className="text-xs text-gray-400">
-                                  {getCompletionPercentage(habit)}% this week
-                                </div>
-                                {habit.type === 'number' && (
-                                  <div className="text-xs text-gray-500 mt-1">
-                                    Target: {habit.target} {habit.unit}
+                            <div className="flex items-center justify-between">
+
+                              <div className="flex items-center">
+                                <span className="text-lg sm:text-xl mr-2 sm:mr-3 opacity-70">{habit.icon}</span>
+                                <div>
+                                  <div className="font-medium text-gray-700 text-xs sm:text-sm">
+                                    {habit.name}
                                   </div>
-                                )}
+                                  <div className="text-xs text-gray-400">
+                                    {getCompletionPercentage(habit)}% this week
+                                  </div>
+                                  {habit.type === 'number' && (
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      Target: {habit.target} {habit.unit}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                              deleteCustomHabit(habit);
+                              }}
+                              className="text-red-400 hover:text-red-600 transition-colors p-1"
+                              title="Delete this habit"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" className="bi bi-trash" viewBox="0 0 16 16">
+                                <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5Zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5Zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6Z"/>
+                                <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1ZM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118ZM2.5 3h11V2h-11v1Z"/>
+                                </svg>
+                              </button>
                             </div>
                           </td>
                           
@@ -827,6 +870,19 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
                       
                       return (
                         <div key={habit.id} className="summary-card text-center bg-white rounded-lg p-2 sm:p-3">
+                           <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteCustomHabit(habit);
+                              }}
+                              className="absolute top-1 right-1 text-red-400 hover:text-red-600 transition-colors"
+                              title="Delete this habit"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" className="bi bi-x-circle" viewBox="0 0 16 16">
+                                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                                <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+                              </svg>
+                            </button>
                           <div className="summary-card-icon text-lg sm:text-2xl mb-1">{habit.icon}</div>
                           <div className="summary-card-name text-xs sm:text-sm font-medium text-gray-700">{habit.name}</div>
                           <div className={`summary-card-value text-sm sm:text-lg font-bold ${

@@ -1,6 +1,6 @@
 // src/hooks/useAuth.js
 import { useState, useEffect } from "react";
-import { auth, db } from "../firebase";
+import { auth, db } from "../services/firebase";
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -28,6 +28,8 @@ export function useAuth() {
 
   // Ensure user document exists with all required fields for game planning
   const ensureUserDocumentExists = async (user) => {
+      console.log("ensureUserDocumentExists called with user:", user); // Add this
+
     if (!user?.uid) return null;
     
     try {
@@ -96,6 +98,8 @@ export function useAuth() {
 
   useEffect(() => {
     // Handle redirect result (mobile login)
+      console.log("useAuth useEffect running"); // Add this
+
     getRedirectResult(auth)
       .then(async (result) => {
         if (result?.user) {
