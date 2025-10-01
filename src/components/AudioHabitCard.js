@@ -10,41 +10,293 @@ import {
   query, 
   where, 
   limit,  Timestamp,
-  getDocs,setDoc
+  getDocs, setDoc, serverTimestamp, orderBy
 } from 'firebase/firestore';
 import { db } from '../services/firebase';
-import { CheckCircle, Headphones, RotateCcw, Plus } from 'lucide-react';
+import { 
+  CheckCircle, 
+  Headphones, 
+  RotateCcw, 
+  Plus,
+  ChevronLeft, // Add these icon imports
+  ChevronRight, 
+  Clock,
+  History
+} from 'lucide-react';
 import '../styles/audioHabitCard.css';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../services/firebase';
 import ErrorBoundary from './ErrorBoundary';
 
-// Add this component to your file
+// Add these styles to the <head> element
+const styles = `
+  .weekly-audio-item.completed {
+    background-color: rgba(16, 185, 129, 0.1); /* Light green background */
+    border: 1px solid #10b981; /* Green border */
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2); /* Subtle green shadow */
+  }
+  
+  .weekly-audio-item .progress-fill.completed {
+    background: linear-gradient(90deg, #10b981, #059669); /* Green gradient */
+  }
+  
+  .weekly-audio-footer {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+    color: #6b7280; /* Gray text */
+  }
+  
+  .days-remaining {
+    font-weight: 500;
+    color: #ef4444; /* Red text to create urgency */
+  }
+  
+  .weekly-audio-item.completed .days-remaining {
+    color: #10b981; /* Change to green when completed */
+  }
+  
+  .completion-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    background: #10b981; /* Green background */
+    color: white;
+    padding: 0.375rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+`;
+
+// Enhanced WeeklyFeaturedAudios component
 const WeeklyFeaturedAudios = () => {
   const [user] = useAuthState(auth);
   const [weeklyAudios, setWeeklyAudios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentWeekId, setCurrentWeekId] = useState('');
   const [userCompletions, setUserCompletions] = useState({});
-  const [isAdmin, setIsAdmin] = useState(false); // For admin functionality
+  const [isAdmin, setIsAdmin] = useState(true); // Keep this for admin controls
+  const [isGeneratingWeeklyAudios, setIsGeneratingWeeklyAudios] = useState(false);
+  
+// New state variables for history
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyWeeks, setHistoryWeeks] = useState([]);
+  const [selectedHistoryWeekId, setSelectedHistoryWeekId] = useState('');
+  const [historyAudios, setHistoryAudios] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyIndex, setHistoryIndex] = useState(0);
 
-  // Function to get current week ID (YYYY-WW format)
+  console.log('WeeklyFeaturedAudios component rendering');
+  console.log('User:', user?.uid);
+  console.log('Admin status:', isAdmin);
+
+  useEffect(() => {
+    // Insert the styles into the document
+    const styleElement = document.createElement('style');
+    styleElement.innerHTML = styles;
+    document.head.appendChild(styleElement);
+    
+    return () => {
+      // Clean up
+      document.head.removeChild(styleElement);
+    };
+  }, []);
+    // Function to get current week ID (YYYY-WW format)
+  // Updated to use Saturday as the first day of the week
   const getCurrentWeekId = () => {
     const now = new Date();
-    const start = new Date(now.getFullYear(), 0, 1);
-    const diff = now - start;
-    const oneWeek = 604800000; // milliseconds in a week
-    const week = Math.ceil(diff / oneWeek);
-    return `${now.getFullYear()}-${week.toString().padStart(2, '0')}`;
+    const dayOfWeek = now.getDay(); // 0 = Sunday, ..., 6 = Saturday
+    
+    // Adjust date to previous Saturday if not already Saturday
+    const startOfWeek = new Date(now);
+    if (dayOfWeek !== 6) { // If not Saturday
+      startOfWeek.setDate(now.getDate() - ((dayOfWeek + 1) % 7));
+    }
+    
+    // Calculate week number from the Saturday-based week
+    const startOfYear = new Date(startOfWeek.getFullYear(), 0, 1);
+    const millisecondsPerWeek = 7 * 24 * 60 * 60 * 1000;
+    const weekNumber = Math.ceil(
+      (startOfWeek - startOfYear) / millisecondsPerWeek
+    );
+    
+    return `${startOfWeek.getFullYear()}-${weekNumber.toString().padStart(2, '0')}`;
+  };
+
+  // For auto-selection, use a curated playlist of SoundCloud URLs
+  const audioPool = [
+    'https://soundcloud.com/manoj-m-286517998/bill-britt-6-6-8-6-6?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/29-bww-3047-kumar-shivaram-anjali-founders-triple-diamond-address-1?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/31-bww-3064-ramesh-rama-the-battle-for-your-mind-3?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/28-bww-2806-ajmani-sugeet-kaajal-programming-your-mind-for-success-gaashaan-ali-maka-things-that-matter-4?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/29-bww-3047-kumar-shivaram-anjali-founders-triple-diamond-address-1?in=manoj-m-286517998/sets/70f0d2b4-e017-452c-ab07-0e56c77721ce&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/31-bww-3062-jim-dornan-becoming-champions-gold-edition-bww-3?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/30-bww-3058-gagan-adlakha-mega-anoop-phogat-titan-be-a-leader?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/sandyinterview?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/32-bww-3080-michael-and-carla?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/33-bww-3070-mona-and-rishi?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing'
+  ];
+
+  // Get random audios from the pool with actual SoundCloud metadata
+  const getRandomAudios = async (count = 5) => {
+    console.log('Getting random audios, count:', count);
+    console.log('Audio pool size:', audioPool.length);
+    
+    const shuffled = [...audioPool].sort(() => 0.5 - Math.random());
+    const selected = shuffled.slice(0, count);
+    
+    console.log('Selected audio URLs:', selected);
+    
+    // Array to hold the processed audios with metadata
+    const processedAudios = [];
+    
+    // Process each audio URL to get its metadata
+    for (let i = 0; i < selected.length; i++) {
+      const url = selected[i];
+      try {
+        // Fetch metadata from SoundCloud oEmbed API
+        const response = await fetch(`https://soundcloud.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+        
+        if (response.ok) {
+          const data = await response.json();
+          
+          // Extract title and author from the response
+          const title = data.title || `Audio ${i + 1}`;
+          const author = data.author_name || 'Unknown Artist';
+          const description = `By ${author}`;
+          
+          processedAudios.push({
+            title,
+            description,
+            audioUrl: url
+          });
+        } else {
+          // Fallback if API call fails
+          processedAudios.push({
+            title: `Featured Audio ${i + 1}`,
+            description: 'Weekly featured audio',
+            audioUrl: url
+          });
+          console.log(`Failed to fetch metadata for ${url}, status: ${response.status}`);
+        }
+      } catch (error) {
+        // Handle errors and still add the audio with default metadata
+        console.error(`Error fetching metadata for ${url}:`, error);
+        processedAudios.push({
+          title: `Featured Audio ${i + 1}`,
+          description: 'Weekly featured audio',
+          audioUrl: url
+        });
+      }
+    }
+    
+    console.log('Processed audios with metadata:', processedAudios);
+    return processedAudios;
+  };
+    // Save weekly audios to Firestore
+  const saveWeeklyAudios = async (audios) => {
+    if (!currentWeekId) {
+      console.error('No week ID available');
+      return;
+    }
+    
+    try {
+      console.log('Starting to save weekly audios...');
+      console.log('Current week ID:', currentWeekId);
+      
+      const weeklyRef = collection(db, 'weeklyAudios');
+      const weeklyQuery = query(weeklyRef, where('weekId', '==', currentWeekId), limit(1));
+      const weeklySnapshot = await getDocs(weeklyQuery);
+      
+      const now = new Date();
+      const currentDay = now.getDay();
+      
+      // Find the previous Saturday (or today if it's Saturday)
+      const saturdayOffset = currentDay === 6 ? 0 : (currentDay + 1);
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - saturdayOffset);
+      weekStart.setHours(0, 0, 0, 0);
+      
+      // Find the upcoming Friday
+      const fridayOffset = currentDay === 5 ? 0 : (5 - currentDay + (currentDay === 6 ? 6 : 0));
+      const weekEnd = new Date(now);
+      weekEnd.setDate(now.getDate() + fridayOffset);
+      weekEnd.setHours(23, 59, 59, 999);
+      
+      if (weeklySnapshot.empty) {
+        // Create new document for this week
+        console.log('Creating new weekly audio document');
+        console.log('Week period:', weekStart.toISOString(), 'to', weekEnd.toISOString());
+        const newDocRef = await addDoc(weeklyRef, {
+          weekId: currentWeekId,
+          startDate: weekStart.toISOString().split('T')[0],
+          endDate: weekEnd.toISOString().split('T')[0],
+          audios,
+          createdAt: Timestamp.fromDate(now),
+          updatedAt: Timestamp.fromDate(now)
+        });
+        console.log('New document created with ID:', newDocRef.id);
+      } else {
+        // Update existing document
+        console.log('Updating existing weekly audio document');
+        const docRef = weeklySnapshot.docs[0].ref;
+        await updateDoc(docRef, {
+          audios,
+          updatedAt: Timestamp.fromDate(now)
+        });
+        console.log('Document updated successfully');
+      }
+      
+      // Update state after saving
+      setWeeklyAudios(audios);
+      console.log('Weekly audios saved successfully!');
+      
+      return true;
+    } catch (error) {
+      console.error('Error saving weekly audios:', error);
+      return false;
+    }
+  };
+
+  // Generate weekly audios if none exist
+  const generateWeeklyAudios = async () => {
+    if (isGeneratingWeeklyAudios || !currentWeekId) return;
+    
+    try {
+      setIsGeneratingWeeklyAudios(true);
+      console.log('Generating weekly featured audios...');
+      
+      // Get 5 random audios with metadata
+      const randomAudios = await getRandomAudios(5);
+      
+      // Save them to Firestore
+      const result = await saveWeeklyAudios(randomAudios);
+      
+      if (result) {
+        console.log('Weekly audios generated successfully');
+      }
+    } catch (error) {
+      console.error('Error generating weekly audios:', error);
+    } finally {
+      setIsGeneratingWeeklyAudios(false);
+    }
   };
 
   // Fetch this week's featured audios
-  const fetchWeeklyAudios = useCallback(async () => {
-    if (!user) return;
+ const fetchWeeklyAudios = useCallback(async () => {
+    console.log('Fetching weekly audios...');
+    if (!user) {
+      console.log('No user available, canceling fetch');
+      return;
+    }
     
     setLoading(true);
     try {
       const weekId = getCurrentWeekId();
+      console.log('Current week ID:', weekId);
       setCurrentWeekId(weekId);
       
       // Get the current week's audios
@@ -54,15 +306,14 @@ const WeeklyFeaturedAudios = () => {
       
       if (!weeklySnapshot.empty) {
         const weeklyData = weeklySnapshot.docs[0].data();
+        console.log('Found weekly audios:', weeklyData.audios || []);
         setWeeklyAudios(weeklyData.audios || []);
       } else {
-        console.log('No featured audios for this week');
+        console.log('No featured audios for this week, generating new ones...');
         setWeeklyAudios([]);
         
-        // For admin only: If no audios for this week and user is admin, could auto-generate
-        if (isAdmin) {
-          // Populate with fallback audios or auto-select from a pool
-        }
+        // Auto-generate weekly audios since none exist
+        generateWeeklyAudios();
       }
       
       // Fetch user's completions for this week's audios
@@ -82,6 +333,9 @@ const WeeklyFeaturedAudios = () => {
           completionsDoc.audios?.forEach(audio => {
             completions[audio.audioUrl] = true;
           });
+          console.log('User has completions:', completions);
+        } else {
+          console.log('No completions found for user');
         }
         
         setUserCompletions(completions);
@@ -90,9 +344,106 @@ const WeeklyFeaturedAudios = () => {
       console.error('Error fetching weekly audios:', error);
     } finally {
       setLoading(false);
+      console.log('Fetch complete, loading set to false');
     }
-  }, [user, isAdmin]);
+  }, [user]);
 
+ // New function to fetch history weeks
+  const fetchHistoryWeeks = useCallback(async () => {
+    if (!user) return;
+    
+    setHistoryLoading(true);
+    try {
+      // Get all week entries, sorted by weekId in descending order
+      const weeklyRef = collection(db, 'weeklyAudios');
+      const weeklyQuery = query(weeklyRef, orderBy('weekId', 'desc'), limit(10));
+      const weeklySnapshot = await getDocs(weeklyQuery);
+      
+      if (!weeklySnapshot.empty) {
+        const weeks = weeklySnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            weekId: data.weekId,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            createdAt: data.createdAt,
+            audios: data.audios || []
+          };
+        });
+        
+        setHistoryWeeks(weeks);
+        
+        // If we have history and are showing history, set the selected week
+        if (weeks.length > 0 && showHistory) {
+          setSelectedHistoryWeekId(weeks[historyIndex].weekId);
+          setHistoryAudios(weeks[historyIndex].audios);
+        }
+      } else {
+        setHistoryWeeks([]);
+      }
+    } catch (error) {
+      console.error('Error fetching history weeks:', error);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [user, showHistory, historyIndex]);
+
+  // New function to fetch user completions for a historical week
+  const fetchHistoryCompletions = useCallback(async (weekId) => {
+    if (!user || !weekId) return {};
+    
+    try {
+      const completionsRef = collection(db, 'weeklyAudioCompletions');
+      const completionsQuery = query(
+        completionsRef,
+        where('userId', '==', user.uid),
+        where('weekId', '==', weekId)
+      );
+      
+      const completionsSnapshot = await getDocs(completionsQuery);
+      const completions = {};
+      
+      if (!completionsSnapshot.empty) {
+        const completionsDoc = completionsSnapshot.docs[0].data();
+        completionsDoc.audios?.forEach(audio => {
+          completions[audio.audioUrl] = true;
+        });
+      }
+      
+      return completions;
+    } catch (error) {
+      console.error('Error fetching history completions:', error);
+      return {};
+    }
+  }, [user]);
+  
+  // Handle navigation between history weeks
+  const navigateHistory = async (direction) => {
+    const newIndex = historyIndex + direction;
+    
+    if (newIndex >= 0 && newIndex < historyWeeks.length) {
+      setHistoryIndex(newIndex);
+      const weekData = historyWeeks[newIndex];
+      setSelectedHistoryWeekId(weekData.weekId);
+      setHistoryAudios(weekData.audios);
+      
+      // Fetch completions for this historical week
+      const historyCompletions = await fetchHistoryCompletions(weekData.weekId);
+      setUserCompletions(historyCompletions);
+    }
+  };
+  
+  const formatDateRange = (startDate, endDate) => {
+  if (!startDate || !endDate) return "";
+  
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  
+  const options = { month: 'short', day: 'numeric' };
+  return `${start.toLocaleDateString('en-US', options)} - ${end.toLocaleDateString('en-US', options)}`;
+};
+  // Check if user is admin
   // Check if user is admin
   useEffect(() => {
     const checkAdminStatus = async () => {
@@ -102,7 +453,11 @@ const WeeklyFeaturedAudios = () => {
         const userRef = doc(db, 'users', user.uid);
         const userDoc = await getDoc(userRef);
         if (userDoc.exists()) {
-          setIsAdmin(userDoc.data().isAdmin === true);
+          const isUserAdmin = userDoc.data().isAdmin === true;
+          console.log('User admin status from DB:', isUserAdmin);
+          setIsAdmin(isUserAdmin);
+        } else {
+          console.log('User document does not exist');
         }
       } catch (error) {
         console.error('Error checking admin status:', error);
@@ -112,12 +467,33 @@ const WeeklyFeaturedAudios = () => {
     checkAdminStatus();
   }, [user]);
 
+
   // Load weekly audios on component mount
   useEffect(() => {
+    console.log('Weekly audios effect running, user:', user?.uid);
     if (user) {
       fetchWeeklyAudios();
+      fetchHistoryWeeks();
     }
-  }, [user, fetchWeeklyAudios]);
+  }, [user, fetchWeeklyAudios, fetchHistoryWeeks]);
+
+
+    useEffect(() => {
+    if (showHistory && historyWeeks.length > 0) {
+      const weekData = historyWeeks[historyIndex];
+      setSelectedHistoryWeekId(weekData.weekId);
+      setHistoryAudios(weekData.audios);
+      
+      // Fetch completions for this historical week
+      fetchHistoryCompletions(weekData.weekId).then(completions => {
+        setUserCompletions(completions);
+      });
+    } else if (!showHistory) {
+      // When exiting history view, reset to current week
+      fetchWeeklyAudios();
+    }
+  }, [showHistory, historyWeeks, historyIndex, fetchHistoryCompletions, fetchWeeklyAudios]);
+
 
   // Mark an audio as completed
   const markAudioCompleted = async (audioUrl, title) => {
@@ -163,29 +539,33 @@ const WeeklyFeaturedAudios = () => {
         [audioUrl]: true
       }));
       
-      // Update user stats
-      const userStatsRef = doc(db, 'userStats', user.uid);
-      const statsDoc = await getDoc(userStatsRef);
-      if (statsDoc.exists()) {
-        await updateDoc(userStatsRef, {
-          weeklyAudiosCompleted: increment(1),
-          lastWeeklyAudioDate: now.toISOString()
-        });
-      } else {
-        await setDoc(userStatsRef, {
-          weeklyAudiosCompleted: 1,
-          lastWeeklyAudioDate: now.toISOString()
-        });
-      }
+      console.log(`Marked audio "${title}" as completed`);
     } catch (error) {
       console.error('Error marking audio as completed:', error);
     }
   };
+// Handle showing history view
+  const toggleHistoryView = () => {
+    setShowHistory(!showHistory);
+  };
+  // If loading, show a spinner
+  if (loading || (showHistory && historyLoading)) {
+    return (
+      <div className="weekly-featured-container loading">
+        <div className="text-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-2 text-gray-600">
+            {showHistory ? 'Loading audio history...' : 'Generating this week\'s featured audios...'}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
       <div className="weekly-featured-container loading">
-        <div className="text-center py-6">
+        <div className="text-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-2 text-gray-600">Loading weekly audios...</p>
         </div>
@@ -193,32 +573,133 @@ const WeeklyFeaturedAudios = () => {
     );
   }
 
-  return (
-    <div className="weekly-featured-container">
-      <div className="weekly-featured-header">
-        <h2 className="text-xl font-bold">This Week's Featured Audios</h2>
-        <p className="text-sm text-gray-600">Listen to our curated selection for this week</p>
-      </div>
-      
-      {weeklyAudios.length === 0 ? (
-        <div className="no-audios-message">
-          <p>No featured audios available for this week</p>
+  if (isGeneratingWeeklyAudios) {
+    return (
+      <div className="weekly-featured-container loading">
+        <div className="text-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-2 text-gray-600">Generating this week's featured audios...</p>
         </div>
-      ) : (
-        <div className="weekly-audios-grid">
-          {weeklyAudios.map((audio, index) => (
-            <WeeklyAudioItem 
-              key={index}
-              audio={audio}
-              isCompleted={userCompletions[audio.audioUrl]}
-              onComplete={() => markAudioCompleted(audio.audioUrl, audio.title)}
-            />
-          ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="weekly-featured-container" style={{ border: '2px solid blue', padding: '15px', margin: '15px 0' }}>
+      <div className="weekly-featured-header">
+        <div className="flex justify-between items-center">
+          <h2 className="text-xl font-bold">{showHistory ? 'Weekly Audio History' : "This Week's Featured Audios"}</h2>
+          <button 
+            onClick={toggleHistoryView}
+            className="audio-history-toggle"
+          >
+            {showHistory ? (
+              <>
+                <RotateCcw size={16} />
+                Current Week
+              </>
+            ) : (
+              <>
+                <History size={16} />
+                View History
+              </>
+            )}
+          </button>
+        </div>
+        <p className="text-sm text-gray-200">
+          {showHistory 
+            ? 'Browse your past weekly audio selections' 
+            : 'Listen to our curated selection for this week (Saturday-Friday)'}
+        </p>
+      </div>
+
+      {/* History navigation UI */}
+      {isAdmin && showHistory && historyWeeks.length > 0 && (
+        <div className="history-navigation">
+          <button 
+            onClick={() => navigateHistory(-1)} 
+            disabled={historyIndex <= 0}
+            className="history-button"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          
+          <div className="week-indicator">
+            <Clock size={16} />
+            <span className="history-week-label">
+              Week {selectedHistoryWeekId} 
+            </span>
+            <span className="text-sm opacity-80">
+              {formatDateRange(
+                historyWeeks[historyIndex]?.startDate,
+                historyWeeks[historyIndex]?.endDate
+              )}
+            </span>
+          </div>
+          
+          <button 
+            onClick={() => navigateHistory(1)} 
+            disabled={historyIndex >= historyWeeks.length - 1}
+            className="history-button"
+          >
+            <ChevronRight size={20} />
+          </button>
         </div>
       )}
+
+      {showHistory ? (
+        // Show historical audios
+        historyAudios.length === 0 ? (
+          <div className="no-audios-message">
+            <p>No featured audios available for this historical week</p>
+          </div>
+        ) : (
+          <div className="weekly-audios-grid">
+            {historyAudios.map((audio, index) => (
+              <WeeklyAudioItem 
+                key={index}
+                audio={audio}
+                isCompleted={userCompletions[audio.audioUrl]}
+                onComplete={() => markAudioCompleted(audio.audioUrl, audio.title)}
+                isHistorical={true}
+              />
+            ))}
+          </div>
+        )
+      ) : (
+        // Show current week audios
+        weeklyAudios.length === 0 ? (
+          <div className="no-audios-message">
+            <p>No featured audios available for this week</p>
+            {isAdmin && (
+              <button
+                onClick={generateWeeklyAudios}
+                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                disabled={isGeneratingWeeklyAudios}
+              >
+                {isGeneratingWeeklyAudios ? 'Generating...' : 'Generate Weekly Audios'}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="weekly-audios-grid">
+            {weeklyAudios.map((audio, index) => (
+              <WeeklyAudioItem 
+                key={index}
+                audio={audio}
+                isCompleted={userCompletions[audio.audioUrl]}
+                onComplete={() => markAudioCompleted(audio.audioUrl, audio.title)}
+                isHistorical={false}
+              />
+            ))}
+          </div>
+        )
+      )}
       
-      {isAdmin && (
-        <div className="admin-controls mt-6">
+      {/* Always show admin controls for admin users */}
+      {isAdmin && !showHistory && (
+        <div className="admin-controls mt-6" style={{ border: '2px dashed red', padding: '10px' }}>
+          <h3>Admin Controls (Visible because isAdmin={String(isAdmin)})</h3>
           <AdminAudioManager 
             currentWeekId={currentWeekId}
             currentAudios={weeklyAudios}
@@ -230,78 +711,294 @@ const WeeklyFeaturedAudios = () => {
   );
 };
 
-// WeeklyAudioItem component to display each audio
-const WeeklyAudioItem = ({ audio, isCompleted, onComplete }) => {
+// WeeklyAudioItem component with improved progress tracking and completion indication
+// Updated WeeklyAudioItem component with Firebase progress tracking like AudioHabitItem
+const WeeklyAudioItem = ({ audio, isCompleted, onComplete, isHistorical = false }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
-  const iframeRef = useRef(null);
+  const [sessionDuration, setSessionDuration] = useState(0);
+  const [remainingDays, setRemainingDays] = useState(0);
+  const [user] = useAuthState(auth);
   const widgetRef = useRef(null);
+  const iframeRef = useRef(null);
+  const sessionStartTimeRef = useRef(null);
+  const progressUpdateTimerRef = useRef(null);
   
+  // Calculate remaining days in the current week (Sat-Fri)
+    // Calculate remaining days in the current week (Sat-Fri)
   useEffect(() => {
-    // Initialize SoundCloud widget
-    if (!iframeRef.current) return;
+    const calculateRemainingDays = () => {
+      // Only calculate remaining days for current week, not historical
+      if (isHistorical) {
+        setRemainingDays(0);
+        return;
+      }
+      
+      const now = new Date();
+      const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+      
+      // Convert to Saturday-based week (where Saturday is day 0)
+      const satBasedDay = (currentDay + 1) % 7;
+      
+      // Calculate days until end of week (Friday)
+      const daysRemaining = 7 - satBasedDay;
+      
+      setRemainingDays(daysRemaining);
+    };
     
-    const initWidget = () => {
-      if (window.SC && window.SC.Widget) {
-        widgetRef.current = window.SC.Widget(iframeRef.current);
-        bindWidgetEvents();
-      } else {
-        const script = document.createElement('script');
-        script.src = 'https://w.soundcloud.com/player/api.js';
-        script.onload = () => {
-          widgetRef.current = window.SC.Widget(iframeRef.current);
-          bindWidgetEvents();
-        };
-        document.body.appendChild(script);
+    calculateRemainingDays();
+  }, [isHistorical]); // Add isHistorical to the dependency array
+  
+  // Load initial progress from Firebase
+  useEffect(() => {
+    const loadProgress = async () => {
+      if (!user || !audio.audioUrl) return;
+      
+      try {
+        // Use the same structure as AudioHabitItem for consistency
+        const progressDocRef = doc(
+          db, 
+          'weeklyAudioProgress', 
+          `${user.uid}_${audio.audioUrl.replace(/[^a-zA-Z0-9]/g, '_')}`
+        );
+        
+        const progressDoc = await getDoc(progressDocRef);
+        if (progressDoc.exists()) {
+          const savedProgress = progressDoc.data();
+          
+          // Set progress from Firebase
+          if (savedProgress.progressPercentage) {
+            setProgress(savedProgress.progressPercentage);
+          }
+          
+          if (savedProgress.sessionDuration) {
+            setSessionDuration(savedProgress.sessionDuration);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading audio progress:', error);
       }
     };
     
-    initWidget();
-  }, []);
-  
-  const bindWidgetEvents = () => {
+    loadProgress();
+  }, [user, audio.audioUrl]);
+
+  // Save progress to Firebase (debounced to prevent too many writes)
+  const saveProgress = useCallback(
+    debounce(async (currentProgress, duration) => {
+      if (!user || !audio.audioUrl || isCompleted) return;
+      
+      try {
+        const progressDocRef = doc(
+          db, 
+          'weeklyAudioProgress', 
+          `${user.uid}_${audio.audioUrl.replace(/[^a-zA-Z0-9]/g, '_')}`
+        );
+        
+        await setDoc(progressDocRef, {
+          userId: user.uid,
+          audioUrl: audio.audioUrl,
+          audioTitle: audio.title,
+          progressPercentage: currentProgress,
+          sessionDuration: duration,
+          lastUpdated: serverTimestamp()
+        }, { merge: true });
+        
+        console.log(`Saved progress (${currentProgress}%) for weekly audio: ${audio.title}`);
+      } catch (error) {
+        console.error('Error saving audio progress:', error);
+      }
+    }, 2000),
+    [user, audio.audioUrl, audio.title, isCompleted]
+  );
+
+  // Set up SoundCloud widget and event listeners
+  useEffect(() => {
+    // Load the SoundCloud Widget API if not already loaded
+    if (!window.SC) {
+      const script = document.createElement('script');
+      script.src = 'https://w.soundcloud.com/player/api.js';
+      script.async = true;
+      document.body.appendChild(script);
+      
+      script.onload = initializeWidget;
+    } else {
+      initializeWidget();
+    }
+    
+    function initializeWidget() {
+      if (!iframeRef.current) return;
+      
+      try {
+        // Create widget once iframe is loaded
+        const iframe = iframeRef.current;
+        if (window.SC && window.SC.Widget) {
+          const widget = window.SC.Widget(iframe);
+          widgetRef.current = widget;
+          
+          widget.bind(window.SC.Widget.Events.READY, () => {
+            console.log("SoundCloud widget ready for weekly audio");
+            
+            // If we have saved progress, seek to that position
+            if (progress > 0 && progress < 90) {
+              widget.getDuration((duration) => {
+                const seekPosition = (progress / 100) * duration;
+                widget.seekTo(seekPosition);
+              });
+            }
+            
+            widget.bind(window.SC.Widget.Events.PLAY_PROGRESS, (e) => {
+              const currentPosition = e.currentPosition;
+              const duration = e.loadedProgress.duration;
+              const currentProgress = Math.floor((currentPosition / duration) * 100);
+              
+              setProgress(currentProgress);
+              
+              // Save progress periodically to Firebase
+              if (currentProgress % 5 === 0) { // Save every 5% progress
+                saveProgress(currentProgress, sessionDuration);
+              }
+              
+              // Auto-mark as completed when progress reaches 90%
+              if (currentProgress > 90 && !isCompleted) {
+                onComplete();
+              }
+            });
+            
+            widget.bind(window.SC.Widget.Events.PLAY, () => {
+              setIsPlaying(true);
+              sessionStartTimeRef.current = Date.now();
+              
+              // Set up timer to periodically update session duration
+              progressUpdateTimerRef.current = setInterval(() => {
+                if (sessionStartTimeRef.current) {
+                  const currentDuration = (Date.now() - sessionStartTimeRef.current) / 1000;
+                  const totalDuration = sessionDuration + currentDuration;
+                  setSessionDuration(totalDuration);
+                }
+              }, 10000); // Update every 10 seconds
+            });
+            
+            widget.bind(window.SC.Widget.Events.PAUSE, () => {
+              setIsPlaying(false);
+              
+              if (progressUpdateTimerRef.current) {
+                clearInterval(progressUpdateTimerRef.current);
+              }
+              
+              if (sessionStartTimeRef.current) {
+                const currentDuration = (Date.now() - sessionStartTimeRef.current) / 1000;
+                const totalDuration = sessionDuration + currentDuration;
+                setSessionDuration(totalDuration);
+                sessionStartTimeRef.current = null;
+                
+                // Save progress when paused
+                widget.getPosition((position) => {
+                  widget.getDuration((duration) => {
+                    const pausedProgress = Math.floor((position / duration) * 100);
+                    saveProgress(pausedProgress, totalDuration);
+                  });
+                });
+              }
+            });
+            
+            widget.bind(window.SC.Widget.Events.FINISH, () => {
+              setIsPlaying(false);
+              
+              if (progressUpdateTimerRef.current) {
+                clearInterval(progressUpdateTimerRef.current);
+              }
+              
+              if (sessionStartTimeRef.current) {
+                const currentDuration = (Date.now() - sessionStartTimeRef.current) / 1000;
+                const totalDuration = sessionDuration + currentDuration;
+                setSessionDuration(totalDuration);
+                sessionStartTimeRef.current = null;
+                
+                // Save 100% progress when finished
+                saveProgress(100, totalDuration);
+              }
+              
+              if (!isCompleted) {
+                onComplete();
+              }
+            });
+          });
+        }
+      } catch (error) {
+        console.error('Error initializing SoundCloud widget:', error);
+      }
+    }
+    
+    return () => {
+      // Cleanup
+      if (widgetRef.current) {
+        try {
+          widgetRef.current.unbind(window.SC.Widget.Events.PLAY_PROGRESS);
+          widgetRef.current.unbind(window.SC.Widget.Events.PLAY);
+          widgetRef.current.unbind(window.SC.Widget.Events.PAUSE);
+          widgetRef.current.unbind(window.SC.Widget.Events.FINISH);
+        } catch (error) {
+          console.error('Error cleaning up widget:', error);
+        }
+      }
+      
+      if (progressUpdateTimerRef.current) {
+        clearInterval(progressUpdateTimerRef.current);
+      }
+      
+      // Save final progress when component unmounts
+      if (progress > 0 && !isCompleted) {
+        saveProgress(progress, sessionDuration);
+      }
+    };
+  }, [audio.audioUrl, isCompleted, onComplete, progress, saveProgress, sessionDuration]);
+
+  const togglePlayPause = () => {
     if (!widgetRef.current) return;
     
-    widgetRef.current.bind(window.SC.Widget.Events.PLAY, () => {
-      setIsPlaying(true);
-    });
-    
-    widgetRef.current.bind(window.SC.Widget.Events.PAUSE, () => {
-      setIsPlaying(false);
-    });
-    
-    widgetRef.current.bind(window.SC.Widget.Events.PLAY_PROGRESS, (data) => {
-      const percentage = Math.round(data.relativePosition * 100);
-      setProgress(percentage);
-      
-      // Mark as completed when user listens to 80%
-      if (percentage >= 80 && !isCompleted) {
-        onComplete();
-      }
-    });
+    if (isPlaying) {
+      widgetRef.current.pause();
+    } else {
+      widgetRef.current.play();
+    }
   };
-  
-  return (
+
+  const handleManualComplete = () => {
+    if (!isCompleted) {
+      // Save 100% progress when manually marked as complete
+      saveProgress(100, sessionDuration);
+      onComplete();
+    }
+  };
+
+  // Format time for display (minutes:seconds)
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs < 10 ? '0' + secs : secs}`;
+  };
+
+   return (
     <div className={`weekly-audio-item ${isCompleted ? 'completed' : ''}`}>
       <div className="audio-item-header">
-        <h3 className="audio-title">{audio.title}</h3>
+        <div className="audio-title">
+          <h3>{audio.title}</h3>
+          <p className="audio-description">{audio.description}</p>
+        </div>
         {isCompleted && (
-          <div className="completed-badge">
-            <CheckCircle size={16} />
+          <div className="completion-badge">
+            <span>✓</span>
             <span>Completed</span>
           </div>
         )}
-      </div>
-      
-      <div className="audio-description">
-        <p>{audio.description}</p>
       </div>
       
       <div className="audio-player">
         <iframe
           ref={iframeRef}
           width="100%"
-          height="100"
+          height="120"
           scrolling="no"
           frameBorder="no"
           allow="autoplay"
@@ -309,12 +1006,186 @@ const WeeklyAudioItem = ({ audio, isCompleted, onComplete }) => {
         ></iframe>
       </div>
       
-      <div className="progress-bar">
-        <div 
-          className="progress-fill"
-          style={{ width: `${progress}%` }}
-        ></div>
+      <div className="audio-controls">
+        <button onClick={togglePlayPause} className="play-pause-btn">
+          {isPlaying ? 'Pause' : 'Play'}
+        </button>
+        <div className="progress-bar">
+          <div 
+            className={`progress ${isCompleted ? 'completed' : ''}`}
+            style={{ width: `${progress}%` }}
+          ></div>
+        </div>
+        {!isCompleted && (
+          <button 
+            onClick={handleManualComplete}
+            className="complete-btn"
+          >
+            Mark Complete
+          </button>
+        )}
       </div>
+       {/* Add "Historical" badge if viewing history */}
+      {isHistorical && !isCompleted && (
+        <div className="historical-badge" style={{
+          position: 'absolute',
+          top: '10px',
+          right: '10px',
+          background: 'rgba(107, 114, 128, 0.7)',
+          color: 'white',
+          padding: '2px 8px',
+          borderRadius: '4px',
+          fontSize: '0.7rem',
+          fontWeight: 'bold'
+        }}>
+          Past Week
+        </div>
+      )}
+
+      <div className="weekly-audio-footer">
+        <div className="progress-stats">
+          <span className="progress-percentage">{progress}% completed</span>
+          {sessionDuration > 0 && (
+            <span className="listening-time">
+              {" • "} {formatTime(sessionDuration)} listened
+            </span>
+          )}
+        </div>
+        
+        {isHistorical ? (
+          <div className={`history-status ${isCompleted ? 'completed' : ''}`}>
+            {isCompleted ? 'Completed' : 'Not completed'}
+          </div>
+        ) : (
+          <div className={`days-remaining ${isCompleted ? 'completed' : ''}`}>
+            {remainingDays} {remainingDays === 1 ? 'day' : 'days'} remaining
+          </div>
+        )}
+      </div>
+
+      <style jsx>{`
+        .weekly-audio-item {
+          border: 1px solid #e1e1e1;
+          border-radius: 8px;
+          padding: 15px;
+          margin-bottom: 20px;
+          background-color: #fff;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        
+        .weekly-audio-item.completed {
+          background-color: #e6f7e6;
+          border-color: #a3d9a3;
+        }
+        
+        .audio-item-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 10px;
+        }
+        
+        .audio-title h3 {
+          margin: 0 0 5px;
+          font-size: 18px;
+          font-weight: 600;
+        }
+        
+        .audio-description {
+          margin: 0;
+          color: #666;
+          font-size: 14px;
+        }
+        
+        .completion-badge {
+          display: inline-block;
+          background-color: #4CAF50;
+          color: white;
+          font-size: 12px;
+          padding: 3px 8px;
+          border-radius: 12px;
+          margin-top: 5px;
+        }
+        
+        .audio-player {
+          margin-top: 10px;
+        }
+        
+        .audio-controls {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 10px;
+          margin-top: 10px;
+        }
+        
+        .play-pause-btn, .complete-btn {
+          padding: 6px 12px;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 14px;
+        }
+        
+        .play-pause-btn {
+          background-color: #ff5500;
+          color: white;
+        }
+        
+        .complete-btn {
+          background-color: #4CAF50;
+          color: white;
+          margin-left: auto;
+        }
+        
+        .complete-btn:disabled {
+          background-color: #cccccc;
+          cursor: not-allowed;
+        }
+        
+        .progress-bar {
+          flex: 1;
+          height: 8px;
+          background-color: #e1e1e1;
+          border-radius: 4px;
+          overflow: hidden;
+        }
+        
+        .progress {
+          height: 100%;
+          background-color: #ff5500;
+          transition: width 0.2s ease;
+        }
+        
+        .progress.completed {
+          background-color: #4CAF50;
+        }
+        
+        .weekly-audio-footer {
+          display: flex;
+          justify-content: space-between;
+          margin-top: 10px;
+          font-size: 14px;
+          color: #666;
+        }
+        
+        .progress-stats {
+          display: flex;
+        }
+        
+        .listening-time {
+          color: #888;
+        }
+        
+        .days-remaining {
+          font-weight: 500;
+          color: #ef4444;
+        }
+        
+        .days-remaining.completed {
+          color: #4CAF50;
+        }
+      `}</style>
     </div>
   );
 };
@@ -329,69 +1200,114 @@ const AdminAudioManager = ({ currentWeekId, currentAudios, onUpdate }) => {
   });
   const [isSaving, setIsSaving] = useState(false);
   
-  // For auto-selection, you could use a curated playlist of SoundCloud URLs
+  console.log('AdminAudioManager rendered with:', { currentWeekId, audiosCount: currentAudios?.length });
+  
+  // For auto-selection, use a curated playlist of SoundCloud URLs
   const audioPool = [
-    // You could have many URLs here that the system can select from
     'https://soundcloud.com/manoj-m-286517998/bill-britt-6-6-8-6-6?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
     'https://soundcloud.com/manoj-m-286517998/29-bww-3047-kumar-shivaram-anjali-founders-triple-diamond-address-1?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
     'https://soundcloud.com/manoj-m-286517998/31-bww-3064-ramesh-rama-the-battle-for-your-mind-3?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
     'https://soundcloud.com/manoj-m-286517998/28-bww-2806-ajmani-sugeet-kaajal-programming-your-mind-for-success-gaashaan-ali-maka-things-that-matter-4?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
     'https://soundcloud.com/manoj-m-286517998/29-bww-3047-kumar-shivaram-anjali-founders-triple-diamond-address-1?in=manoj-m-286517998/sets/70f0d2b4-e017-452c-ab07-0e56c77721ce&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/30-bww-3050-ajmani-sugeet-things-done-right-gaashaan-ali-the-next-90-days-2?in=manoj-m-286517998/sets/70f0d2b4-e017-452c-ab07-0e56c77721ce&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/31-bww-3064-ramesh-rama-the-battle-for-your-mind-3?in=manoj-m-286517998/sets/70f0d2b4-e017-452c-ab07-0e56c77721ce&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/28-bww-2806-ajmani-sugeet-kaajal-programming-your-mind-for-success-gaashaan-ali-maka-things-that-matter-4?in=manoj-m-286517998/sets/70f0d2b4-e017-452c-ab07-0e56c77721ce&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/26-bww-2594-ajmani-sugeet-gaashaan-ali-kumar-saji-reflections-1?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/27-bww-2754-ajmani-sugeet-kaajal-new-double-diamonds-gaashaan-ali-maka-new-founders-executive-diamonds-2?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/26-bww-2594-ajmani-sugeet-gaashaan-ali-kumar-saji-reflections-1?in=manoj-m-286517998/sets/sugeet-ali&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/27-bww-2754-ajmani-sugeet-kaajal-new-double-diamonds-gaashaan-ali-maka-new-founders-executive-diamonds-2?in=manoj-m-286517998/sets/sugeet-ali&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/25-bww-2223-gaashaan-ali-maka?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/23-bww-1999-ali-maka-new?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/15-put-work-behind-your-dreams?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/14-the-gift-of-mentorship-tony?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/13-new-diamonds-craig-and?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/6-vinny-pappalardo-mentorship?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/11-all-in-vinny-and-dayna?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/10-the-why-bill-britt?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/5-charlie-durso-book-it?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/7-distractions-and-hidden?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/8-building-a-team-vs-building?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/4-charlie-ann-durso-flush-the?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/3-bww2447-jyotiprakash-rashmi?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/2-bww738-get-engaged-in-the?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/12-never-stop-learning-the?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
-    'https://soundcloud.com/manoj-m-286517998/9-from-new-ibo-to-core-ibo?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing'
-
-    // ... many more tracks
+    'https://soundcloud.com/manoj-m-286517998/31-bww-3062-jim-dornan-becoming-champions-gold-edition-bww-3?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/30-bww-3058-gagan-adlakha-mega-anoop-phogat-titan-be-a-leader?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/sandyinterview?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/32-bww-3080-michael-and-carla?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing',
+    'https://soundcloud.com/manoj-m-286517998/33-bww-3070-mona-and-rishi?utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing'
   ];
 
-  // Get random audios from the pool
-  const getRandomAudios = (count = 5) => {
+  // Get random audios from the pool with actual SoundCloud metadata
+  const getRandomAudios = async (count = 5) => {
+    console.log('Getting random audios, count:', count);
+    console.log('Audio pool size:', audioPool.length);
+    
     const shuffled = [...audioPool].sort(() => 0.5 - Math.random());
-    return shuffled.slice(0, count).map(url => ({
-      title: `Auto-selected Audio ${Math.floor(Math.random() * 1000)}`,
-      description: 'This audio was automatically selected from our curated pool',
-      audioUrl: url
-    }));
+    const selected = shuffled.slice(0, count);
+    
+    console.log('Selected audio URLs:', selected);
+    
+    // Array to hold the processed audios with metadata
+    const processedAudios = [];
+    
+    // Process each audio URL to get its metadata
+    for (let i = 0; i < selected.length; i++) {
+      const url = selected[i];
+      try {
+        // Fetch metadata from SoundCloud oEmbed API
+        const response = await fetch(`https://soundcloud.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+        
+        if (response.ok) {
+          const data = await response.json();
+          
+          // Extract title and author from the response
+          const title = data.title || `Audio ${i + 1}`;
+          const author = data.author_name || 'Unknown Artist';
+          const description = `By ${author}`;
+          
+          processedAudios.push({
+            title,
+            description,
+            audioUrl: url
+          });
+        } else {
+          // Fallback if API call fails
+          processedAudios.push({
+            title: `Featured Audio ${i + 1}`,
+            description: 'Weekly featured audio',
+            audioUrl: url
+          });
+          console.log(`Failed to fetch metadata for ${url}, status: ${response.status}`);
+        }
+      } catch (error) {
+        // Handle errors and still add the audio with default metadata
+        console.error(`Error fetching metadata for ${url}:`, error);
+        processedAudios.push({
+          title: `Featured Audio ${i + 1}`,
+          description: 'Weekly featured audio',
+          audioUrl: url
+        });
+      }
+    }
+    
+    console.log('Processed audios with metadata:', processedAudios);
+    return processedAudios;
   };
-  
-  // Save new weekly audios
+    // Save weekly audios to Firestore
   const saveWeeklyAudios = async (audios) => {
+    if (!currentWeekId) {
+      console.error('No week ID available');
+      return;
+    }
+    
     setIsSaving(true);
     try {
+      console.log('Starting to save weekly audios...');
+      console.log('Current week ID:', currentWeekId);
+      
       const weeklyRef = collection(db, 'weeklyAudios');
       const weeklyQuery = query(weeklyRef, where('weekId', '==', currentWeekId), limit(1));
       const weeklySnapshot = await getDocs(weeklyQuery);
       
       const now = new Date();
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - now.getDay()); // Start from Sunday
+      const currentDay = now.getDay();
       
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 6); // End on Saturday
+      // Find the previous Saturday (or today if it's Saturday)
+      const saturdayOffset = currentDay === 6 ? 0 : (currentDay + 1);
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - saturdayOffset);
+      weekStart.setHours(0, 0, 0, 0);
+      
+      // Find the upcoming Friday
+      const fridayOffset = currentDay === 5 ? 0 : (5 - currentDay + (currentDay === 6 ? 6 : 0));
+      const weekEnd = new Date(now);
+      weekEnd.setDate(now.getDate() + fridayOffset);
+      weekEnd.setHours(23, 59, 59, 999);
       
       if (weeklySnapshot.empty) {
         // Create new document for this week
-        await addDoc(weeklyRef, {
+        console.log('Creating new weekly audio document');
+        console.log('Week period:', weekStart.toISOString(), 'to', weekEnd.toISOString());
+        const newDocRef = await addDoc(weeklyRef, {
           weekId: currentWeekId,
           startDate: weekStart.toISOString().split('T')[0],
           endDate: weekEnd.toISOString().split('T')[0],
@@ -399,28 +1315,34 @@ const AdminAudioManager = ({ currentWeekId, currentAudios, onUpdate }) => {
           createdAt: Timestamp.fromDate(now),
           updatedAt: Timestamp.fromDate(now)
         });
+        console.log('New document created with ID:', newDocRef.id);
       } else {
         // Update existing document
+        console.log('Updating existing weekly audio document');
         const docRef = weeklySnapshot.docs[0].ref;
         await updateDoc(docRef, {
           audios,
           updatedAt: Timestamp.fromDate(now)
         });
+        console.log('Document updated successfully');
       }
       
+      console.log('Weekly audios saved successfully!');
       onUpdate();
       alert('Weekly audios updated successfully!');
     } catch (error) {
       console.error('Error saving weekly audios:', error);
-      alert('Error saving weekly audios');
+      alert('Error saving weekly audios: ' + error.message);
     } finally {
       setIsSaving(false);
       setIsAdding(false);
+      console.log('Save operation completed');
     }
   };
   
   // Handle adding a manual audio
   const handleAddAudio = () => {
+    console.log('handleAddAudio called with inputs:', audioInputs);
     if (!audioInputs.title || !audioInputs.audioUrl) {
       alert('Title and URL are required');
       return;
@@ -431,27 +1353,35 @@ const AdminAudioManager = ({ currentWeekId, currentAudios, onUpdate }) => {
       { ...audioInputs }
     ];
     
+    console.log('Updated audios:', updatedAudios);
     saveWeeklyAudios(updatedAudios);
     setAudioInputs({ title: '', description: '', audioUrl: '' });
   };
   
-// Update handleAutoGenerate function in AdminAudioManager:
-const handleAutoGenerate = async () => {
-  try {
-    console.log('Starting auto-generation...');
-    const randomAudios = getRandomAudios(5);
-    console.log('Random audios selected:', randomAudios);
-    await saveWeeklyAudios(randomAudios);
-    console.log('Auto-generation completed successfully');
-  } catch (error) {
-    console.error('Error during auto-generation:', error);
-    alert('Failed to auto-generate audios: ' + error.message);
-  }
-};
-  
+  // Handle auto-generation of audios
+  const handleAutoGenerate = async () => {
+    console.log('handleAutoGenerate called');
+    try {
+      console.log('Starting auto-generation...');
+      setIsSaving(true);
+      const randomAudios = await getRandomAudios(5);
+      console.log('Random audios selected with metadata:', randomAudios);
+      await saveWeeklyAudios(randomAudios);
+      console.log('Auto-generation completed successfully');
+    } catch (error) {
+      console.error('Error during auto-generation:', error);
+      alert('Failed to auto-generate audios: ' + error.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="admin-audio-manager">
       <h3 className="text-lg font-semibold mb-4">Manage Weekly Audios</h3>
+      <p>Current Week ID: {currentWeekId || 'Not set'}</p>
+      <p>Current Audios Count: {currentAudios?.length || 0}</p>
+      <p>Week Period: Saturday to Friday</p>
       
       <div className="action-buttons mb-4">
         <button 
@@ -462,11 +1392,14 @@ const handleAutoGenerate = async () => {
         </button>
         
         <button 
-          onClick={handleAutoGenerate}
-          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-          disabled={isSaving}
+            onClick={() => {
+              console.log('Auto-generate button clicked!');
+              handleAutoGenerate();
+            }}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            style={{ border: '2px solid black' }}
         >
-          {isSaving ? 'Generating...' : 'Auto-Generate 5 Audios'}
+            {isSaving ? 'Generating...' : 'Auto-Generate 5 Audios (Click Me)'}
         </button>
       </div>
       
@@ -539,6 +1472,10 @@ const handleAutoGenerate = async () => {
     </div>
   );
 };
+
+// Ensure the updated WeeklyFeaturedAudios is exported
+export { WeeklyFeaturedAudios };
+
 // Debounce utility
 const debounce = (func, wait) => {
   let timeout;
@@ -559,6 +1496,31 @@ const AudioHabitCard = ({ user: propUser }) => {
   const [newHabitTitle, setNewHabitTitle] = useState('');
   const [newHabitUrl, setNewHabitUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showWeeklyAudios, setShowWeeklyAudios] = useState(true); // Default to showing weekly audios
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Add effect to check if user is admin
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      if (!user) return;
+      
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userRef);
+        if (userDoc.exists()) {
+          const isUserAdmin = userDoc.data().isAdmin === true;
+          console.log('User admin status from DB:', isUserAdmin);
+          setIsAdmin(isUserAdmin);
+        } else {
+          console.log('User document does not exist');
+        }
+      } catch (error) {
+        console.error('Error checking admin status:', error);
+      }
+    };
+    
+    checkAdminStatus();
+  }, [user]);
 
   const addNewAudioHabit = async (e) => {
     e.preventDefault();
@@ -627,27 +1589,42 @@ const AudioHabitCard = ({ user: propUser }) => {
     }
   }, [user, loading, error]);
 
-
   useEffect(() => {
     if (user) {
       fetchAudioHabits();
     }
   }, [user, fetchAudioHabits]);
 
-
   return (
     <div className="audio-habits-container">
       <div className="mb-6 flex justify-between items-center">
+        {isAdmin && (
+          <button
+            onClick={() => setShowAddForm(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+          >
+            <Plus size={20} />
+            Add New Audio Habit
+          </button>
+        )}
+        
         <button
-          onClick={() => setShowAddForm(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+          onClick={() => setShowWeeklyAudios(!showWeeklyAudios)}
+          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
         >
-          <Plus size={20} />
-          Add New Audio Habit
+          {showWeeklyAudios ? 'Hide' : 'Show'} Weekly Featured Audios
         </button>
       </div>
 
-      {showAddForm && (
+      {/* Show weekly audios component by default */}
+      {showWeeklyAudios && (
+        <div className="mb-6">
+          <h2 className="text-lg font-bold mb-2">Weekly Featured Audios</h2>
+          <WeeklyFeaturedAudios />
+        </div>
+      )}
+
+      {showAddForm && isAdmin && (
         <div className="bg-white rounded-lg shadow p-6 mb-6">
           <form onSubmit={addNewAudioHabit}>
             <div className="mb-4">
@@ -694,650 +1671,267 @@ const AudioHabitCard = ({ user: propUser }) => {
           </form>
         </div>
       )}
-
-      {audioHabits.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-lg shadow">
-          <Headphones size={48} className="mx-auto text-gray-400 mb-4" />
-          <h3 className="text-xl font-semibold text-gray-800 mb-2">
-            No Audio Habits Yet
-          </h3>
-          <p className="text-gray-600 mb-4">
-            Add your first audio habit to get started!
-          </p>
-          <button
-            onClick={() => setShowAddForm(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Add Audio Habit
-          </button>
-        </div>
-      ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {audioHabits.map(habit => (
-            <AudioHabitItem 
-              key={habit.id}
-              habit={habit}
-              userId={user.uid}
-              onComplete={fetchAudioHabits}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+       </div>
   );
 };
+// Add this component within the AudioHabitCard.js file before where it's being used
 
 const AudioHabitItem = ({ habit, userId, onComplete }) => {
-  const [user, loading, error] = useAuthState(auth);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [hasCompletedToday, setHasCompletedToday] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [sessionStarted, setSessionStarted] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-  const [completionHistory, setCompletionHistory] = useState([]);
-  const [encryptedMediaError, setEncryptedMediaError] = useState(false);
-
-  const widgetRef = useRef(null);
-  const sessionRef = useRef(null);
+  const [completed, setCompleted] = useState(false);
   const iframeRef = useRef(null);
-  const lastUpdateRef = useRef(Date.now());
-  const progressRef = useRef({
-    percentage: 0,
-    duration: 0,
-    needsUpdate: false
-  });
-
-  // Move hooks before any conditional returns
-  const updateProgressInDB = useCallback(async () => {
-    if (!user) return;
-
-    const now = Date.now();
-    if (now - lastUpdateRef.current < 30000) return;
-    if (!progressRef.current.needsUpdate) return;
-
-    try {
-      const habitRef = doc(db, 'habits', habit.id);
-      await updateDoc(habitRef, {
-        'stats.totalListeningTime': increment(progressRef.current.duration),
-        lastUpdated: new Date().toISOString()
-      });
-    console.log('✅ Progress updated successfully');
-      progressRef.current.needsUpdate = false;
-      lastUpdateRef.current = now;
-    } catch (error) {
-      console.error('Error updating progress:', error);
-      if (error.code === 'permission-denied') {
-        console.log('Authentication required');
-      }
-    }
-  }, [habit.id, user]);
-
-  const debouncedProgressUpdate = useRef(
-    debounce(async () => {
-      if (progressRef.current.needsUpdate) {
-        await updateProgressInDB();
-      }
-    }, 30000)
-  ).current;
-
-  const checkTodayCompletion = useCallback(async () => {
-    const today = new Date().toISOString().split('T')[0];
-    const cacheKey = `habit_${habit.id}_${today}`;
-    
-    const cached = localStorage.getItem(cacheKey);
-    if (cached) {
-      setHasCompletedToday(JSON.parse(cached));
-      return;
-    }
-
-    const habitDoc = await getDoc(doc(db, 'habits', habit.id));
-    if (habitDoc.exists()) {
-      const data = habitDoc.data();
-      const completions = data.completions || [];
-      const completed = completions.includes(today);
-      setHasCompletedToday(completed);
-      localStorage.setItem(cacheKey, JSON.stringify(completed));
-    }
-  }, [habit.id]);
-
-  const loadCompletionHistory = useCallback(async () => {
-    if (!user) return;
-
-    try {
-      const sessionsRef = collection(db, 'audioSessions');
-      const q = query(
-        sessionsRef,
-        where('habitId', '==', habit.id),
-        where('userId', '==', userId)
-      );
-      
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        const sessionDoc = snapshot.docs[0].data();
-        const completions = sessionDoc.completions || {};
-        
-        const history = Object.entries(completions)
-          .map(([date, record]) => ({
-            id: date,
-            ...record
-          }))
-          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-          .slice(0, 10);
-        
-        setCompletionHistory(history);
-      } else {
-        setCompletionHistory([]);
-      }
-    } catch (error) {
-      console.error('Error loading completion history:', error);
-      if (error.code === 'permission-denied') {
-        console.log('Authentication required');
-      }
-    }
-  }, [habit.id, userId, user]);
-
-  // Add this function at component level to check for existing sessions
- const checkExistingSession = useCallback(async () => {
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const sessionsRef = collection(db, 'audioSessions');
-      const q = query(
-        sessionsRef,
-        where('habitId', '==', habit.id),
-        where('userId', '==', userId),
-        where('createdAt', '>=', `${today}T00:00:00.000Z`),
-        where('createdAt', '<=', `${today}T23:59:59.999Z`)
-      );
-
-      const snapshot = await getDocs(q);
-      return snapshot.empty ? null : {
-        id: snapshot.docs[0].id,
-        ...snapshot.docs[0].data()
-      };
-    } catch (error) {
-      console.error('Error checking existing session:', error);
-      return null;
-    }
-  }, [habit.id, userId]); // Dependencies: recalculate when these change
-
-  const markHabitComplete = useCallback(async (duration, percentageCompleted) => {
-    const habitRef = doc(db, 'habits', habit.id);
-    const now = new Date();
-    const today = now.toISOString().split('T')[0];
-
-    try {
-      const habitDoc = await getDoc(habitRef);
-      const currentData = habitDoc.data();
-      const lastCompletedDate = currentData.lastCompletedDate;
-      
-      let newStreak = currentData.currentStreak || 0;
-      if (lastCompletedDate) {
-        const lastDate = new Date(lastCompletedDate);
-        const yesterday = new Date(now);
-        yesterday.setDate(yesterday.getDate() - 1);
-        
-        if (lastDate.toISOString().split('T')[0] === yesterday.toISOString().split('T')[0]) {
-          newStreak += 1;
-        } else if (lastDate.toISOString().split('T')[0] !== today) {
-          newStreak = 1;
-        }
-      } else {
-        newStreak = 1;
-      }
-
-      const completionRecord = {
-        date: today,
-        timestamp: now.toISOString(),
-        duration,
-        percentageCompleted,
-        deviceInfo: {
-          userAgent: navigator.userAgent,
-          platform: navigator.platform
-        }
-      };
-      console.log('📊 Checking for existing audioSession...');
-
-      // Check if audioSession exists
-      const sessionsRef = collection(db, 'audioSessions');
-      const q = query(
-        sessionsRef,
-        where('habitId', '==', habit.id),
-        where('userId', '==', userId)
-      );
-      
-      const sessionSnapshot = await getDocs(q);
-      
-       console.log('💾 Updating habit data...', {
-        newStreak,
-        totalCompletions: currentData.totalCompletions + 1
-      });
-
-      // Update everything at once
-      await updateDoc(habitRef, {
-        completions: arrayUnion(today),
-        lastCompletedDate: today,
-        totalCompletions: increment(1),
-        currentStreak: newStreak,
-        'stats.audioSessions': increment(1),
-        'stats.totalListeningTime': increment(duration),
-        'stats.completionHistory': arrayUnion(completionRecord),
-        lastUpdated: now.toISOString()
-      });
-
-      if (sessionSnapshot.empty) {
-        console.log('📝 Creating new audioSession record');    
-        await addDoc(sessionsRef, {
-          habitId: habit.id,
-          userId,
-          habitTitle: habit.title,
-          firstCompletion: completionRecord,
-          lastCompletion: completionRecord,
-          totalCompletions: 1,
-          totalDuration: duration,
-          createdAt: now.toISOString(),
-          updatedAt: now.toISOString(),
-          completions: { [today]: completionRecord }
-        });
-      } else {
-        console.log('📝 Updating existing audioSession record');
-        const sessionDoc = sessionSnapshot.docs[0];
-        await updateDoc(doc(sessionsRef, sessionDoc.id), {
-          lastCompletion: completionRecord,
-          totalCompletions: increment(1),
-          totalDuration: increment(duration),
-          updatedAt: now.toISOString(),
-          [`completions.${today}`]: completionRecord
-        });
-      }
-      console.log('✅ Habit completion saved successfully');
-      progressRef.current.needsUpdate = false;
-      setHasCompletedToday(true);
-      if (onComplete) onComplete();
-
-      return true;
-    } catch (error) {
-      console.error('❌ Error marking habit complete:', error);
-      return false;
-    }
-  }, [habit.id, habit.title, userId, onComplete]);
-
- const bindWidgetEvents = useCallback(() => {
-    if (!widgetRef.current) return;
-
-    widgetRef.current.bind(window.SC.Widget.Events.PLAY, async () => {
-      setIsPlaying(true);
-      
-      if (!sessionStarted && !hasCompletedToday) {
-        const existingSession = await checkExistingSession();
-        
-        if (existingSession && !existingSession.isCompleted) {
-          console.log('🔄 Resuming existing session from today:', existingSession.id);
-      sessionRef.current = {
-        ...existingSession,
-        startTime: Date.now(),
-        isActive: true,
-        status: 'playing',
-        sessionId: existingSession.id // Store the existing session ID
-      };
-    } else if (!existingSession) {
-      console.log('🎵 Starting new audio session (no existing session found)');
-      sessionRef.current = {
-        habitId: habit.id,
-        startTime: Date.now(),
-        startedAt: new Date().toISOString(),
-        pauseCount: 0,
-        isActive: true,
-        lastPlayPosition: 0,
-        actualPlayTime: 0
-      };
-    } else {
-      console.log('⏭️ Found completed session for today, skipping session tracking');
-    }
-    setSessionStarted(true);
-  }
-});
-
-// Update the PAUSE handler
-widgetRef.current.bind(window.SC.Widget.Events.PAUSE, async () => {
-  setIsPlaying(false);
-  if (sessionRef.current) {
-    sessionRef.current.pauseCount++;
-    if (progressRef.current.duration > 30) {
-      console.log('⏸️ Paused at position:', progressRef.current.duration);
-      
-      if (!hasCompletedToday) {
-        const currentTime = Date.now();
-        const sessionDuration = Math.round((currentTime - sessionRef.current.startTime) / 1000);
-        
-        sessionRef.current.actualPlayTime += 
-          progressRef.current.duration - (sessionRef.current.lastPlayPosition || 0);
-        sessionRef.current.lastPlayPosition = progressRef.current.duration;
-
-        try {
-          await updateProgressInDB();
-
-          const sessionsRef = collection(db, 'audioSessions');
-          const sessionData = {
-            lastPlayPosition: progressRef.current.duration,
-            actualPlayTime: sessionRef.current.actualPlayTime,
-            totalDuration: sessionDuration,
-            pauseCount: sessionRef.current.pauseCount,
-            status: 'paused',
-            updatedAt: new Date().toISOString()
-          };
-
-          if (sessionRef.current.sessionId) {
-            // Update existing session
-            console.log('📝 Updating existing session:', sessionRef.current.sessionId);
-            await updateDoc(doc(sessionsRef, sessionRef.current.sessionId), sessionData);
-          } else {
-            // Create new session only if one doesn't exist
-            const existingSession = await checkExistingSession();
-            
-            if (!existingSession) {
-              console.log('📝 Creating new session record');
-              const newSessionRef = await addDoc(sessionsRef, {
-                habitId: habit.id,
-                userId,
-                habitTitle: habit.title,
-                createdAt: sessionRef.current.startedAt,
-                startedAt: sessionRef.current.startedAt,
-                isCompleted: false,
-                ...sessionData
-              });
-              sessionRef.current.sessionId = newSessionRef.id;
-            } else {
-              console.log('📝 Using existing session:', existingSession.id);
-              sessionRef.current.sessionId = existingSession.id;
-              await updateDoc(doc(sessionsRef, existingSession.id), sessionData);
-            }
-          }
-        } catch (error) {
-          console.error('❌ Error saving session on pause:', error);
-        }
-      } else {
-        console.log('⏭️ Skipping session save - audio already completed today');
-      }
-
-      debouncedProgressUpdate();
-    }
-  }
-});
-
-    widgetRef.current.bind(window.SC.Widget.Events.PLAY_PROGRESS, (data) => {
-      const percentage = Math.round(data.relativePosition * 100);
-      const duration = Math.round(data.currentPosition / 1000);
-      
-      setProgress(percentage);
-      
-      progressRef.current = {
-        percentage,
-        duration,
-        needsUpdate: true
-      };
-
-      debouncedProgressUpdate();
-
-      if (percentage >= habit.requiredListeningPercentage && !hasCompletedToday) {
-        markHabitComplete(duration, percentage);
-      }
-    });
-  }, [habit.requiredListeningPercentage, hasCompletedToday, markHabitComplete, sessionStarted, debouncedProgressUpdate]);
-
-  const handleReset = useCallback(async () => {
-    if (!hasCompletedToday) return;
-    
-    const today = new Date().toISOString().split('T')[0];
-    
-    try {
-         console.log('🔄 Resetting habit completion for today:', {
-        habitId: habit.id,
-        date: today
-      });
-      const habitDoc = await getDoc(doc(db, 'habits', habit.id));
-      const data = habitDoc.data();
-      const updatedCompletions = (data.completions || []).filter(date => date !== today);
-      
-      await updateDoc(doc(db, 'habits', habit.id), {
-        completions: updatedCompletions,
-        totalCompletions: Math.max(0, (data.totalCompletions || 1) - 1)
-      });
-    console.log('✅ Habit reset successful');
-
-      setHasCompletedToday(false);
-      setProgress(0);
-    } catch (error) {
-      console.error('Error resetting habit:', error);
-    }
-  }, [habit.id, hasCompletedToday]);
-  
+  const widgetRef = useRef(null);
 
   useEffect(() => {
-    checkTodayCompletion();
-  }, [checkTodayCompletion]);
-
-  useEffect(() => {
-    if (user) {
-      checkTodayCompletion();
-    }
-  }, [checkTodayCompletion, user]);
-
-  useEffect(() => {
-    if (!iframeRef.current) return;
-
-    const initWidget = () => {
-      if (window.SC && window.SC.Widget) {
-        widgetRef.current = window.SC.Widget(iframeRef.current);
-        bindWidgetEvents();
-      } else {
-        const script = document.createElement('script');
-        script.src = 'https://w.soundcloud.com/player/api.js';
-        script.onerror = () => {
-          setEncryptedMediaError(true);
-        };
-        script.onload = () => {
-          try {
-            widgetRef.current = window.SC.Widget(iframeRef.current);
-            bindWidgetEvents();
-          } catch (error) {
-            console.error('Error initializing SoundCloud widget:', error);
-            setEncryptedMediaError(true);
-          }
-        };
-        document.body.appendChild(script);
+    // Check if the habit is already completed
+    const checkCompletionStatus = async () => {
+      if (!userId || !habit.id) return;
+      
+      try {
+        const completionDocRef = doc(db, 'userCompletions', `${userId}_${habit.id}`);
+        const completionDoc = await getDoc(completionDocRef);
+        if (completionDoc.exists()) {
+          setCompleted(true);
+        }
+      } catch (error) {
+        console.error("Error checking completion status:", error);
       }
     };
 
-    initWidget();
+    checkCompletionStatus();
+  }, [userId, habit.id]);
 
-     return () => {
-    if (sessionRef.current?.isActive) {
-      const now = Date.now();
-      const totalDuration = Math.max(
-        sessionRef.current.actualPlayTime,
-        Math.round((now - sessionRef.current.startTime) / 1000)
-      );
+  useEffect(() => {
+    let widget = null;
 
-      // Only save sessions that lasted more than 1 second
-      if (totalDuration > 1) {
-        const sessionData = {
-          ...sessionRef.current,
-          endedAt: new Date().toISOString(),
-          status: 'interrupted',
-          totalDuration,
-          actualPlayTime: sessionRef.current.actualPlayTime
-        };
-        console.log('📝 Session saved on cleanup:', sessionData);
+    // Initialize SoundCloud Widget
+    if (habit.soundCloudUrl && iframeRef.current) {
+      // Load SoundCloud Widget API if not loaded
+      if (!window.SC) {
+        const script = document.createElement('script');
+        script.src = 'https://w.soundcloud.com/player/api.js';
+        script.async = true;
+        document.body.appendChild(script);
 
-        // Optionally, save significant sessions to the database
-        if (totalDuration > 30) {
-          try {
-            const sessionsRef = collection(db, 'audioSessions');
-            addDoc(sessionsRef, {
-              ...sessionData,
-              userId,
-              habitTitle: habit.title,
-              createdAt: sessionData.startedAt,
-              updatedAt: sessionData.endedAt
-            }).then(() => {
-              console.log('💾 Long session saved to database');
-            });
-          } catch (error) {
-            console.error('Error saving session:', error);
-          }
-        }
+        script.onload = initializeWidget;
       } else {
-        console.log('⏭️ Skipping short session save:', {
-          habitId: habit.id,
-          duration: totalDuration
-        });
+        initializeWidget();
       }
     }
-    if (progressRef.current.needsUpdate) {
-      console.log('🔄 Final progress update on cleanup');
-      updateProgressInDB();
+
+    function initializeWidget() {
+      // Wait until SC is defined
+      if (!window.SC) {
+        setTimeout(initializeWidget, 100);
+        return;
+      }
+
+      widget = window.SC.Widget(iframeRef.current);
+      widgetRef.current = widget;
+
+      widget.bind(window.SC.Widget.Events.READY, () => {
+        console.log("SoundCloud widget ready");
+        
+        widget.bind(window.SC.Widget.Events.PLAY_PROGRESS, (e) => {
+          setProgress(e.currentPosition / e.loadedProgress.duration * 100);
+          
+          // Mark as completed when progress reaches 90%
+          if (e.currentPosition / e.loadedProgress.duration > 0.9 && !completed) {
+            handleComplete();
+          }
+        });
+
+        widget.bind(window.SC.Widget.Events.PLAY, () => {
+          setIsPlaying(true);
+        });
+
+        widget.bind(window.SC.Widget.Events.PAUSE, () => {
+          setIsPlaying(false);
+        });
+
+        widget.bind(window.SC.Widget.Events.FINISH, () => {
+          setIsPlaying(false);
+          if (!completed) {
+            handleComplete();
+          }
+        });
+      });
+    }
+
+    return () => {
+      // Cleanup
+      if (widgetRef.current) {
+        widgetRef.current.unbind(window.SC.Widget.Events.PLAY_PROGRESS);
+        widgetRef.current.unbind(window.SC.Widget.Events.PLAY);
+        widgetRef.current.unbind(window.SC.Widget.Events.PAUSE);
+        widgetRef.current.unbind(window.SC.Widget.Events.FINISH);
+      }
+    };
+  }, [habit.soundCloudUrl, completed]);
+
+  const handleComplete = async () => {
+    if (!userId || !habit.id) return;
+    
+    try {
+      // Record completion in Firestore
+      const completionDocRef = doc(db, 'userCompletions', `${userId}_${habit.id}`);
+      await setDoc(completionDocRef, {
+        userId,
+        habitId: habit.id,
+        completedAt: serverTimestamp(),
+      });
+      
+      setCompleted(true);
+      if (onComplete) onComplete();
+    } catch (error) {
+      console.error("Error marking habit as completed:", error);
     }
   };
-}, [bindWidgetEvents, updateProgressInDB, userId, habit.id, habit.title]);
 
-    // Show loading state while checking authentication
-    if (loading) {
-        return <div>Loading...</div>;
+  const togglePlayPause = () => {
+    if (!widgetRef.current) return;
+    
+    if (isPlaying) {
+      widgetRef.current.pause();
+    } else {
+      widgetRef.current.play();
     }
-
-    // Show error state if authentication failed
-    if (error) {
-        return <div>Error: {error.message}</div>;
-    }
-
-    // Show not authenticated state
-    if (!user) {
-        return <div>Please sign in to access this feature</div>;
-    }
-  if (encryptedMediaError) {
-    return (
-      <div className="audio-habit-card error">
-        <div className="p-4 bg-red-50 rounded-lg">
-          <h3 className="text-lg font-semibold text-red-800">{habit.title}</h3>
-          <p className="text-red-600 mt-2">
-            Unable to load audio player. Your browser might not support encrypted media content.
-            Try using a different browser or enabling DRM support.
-          </p>
-          <a 
-            href={habit.audioUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800 mt-2 inline-block"
-          >
-            Open in SoundCloud
-          </a>
-        </div>
-      </div>
-    );
-  }
+  };
 
   return (
-    <div 
-      id={`audio-habit-${habit.id}`}
-      className={`audio-habit-card ${hasCompletedToday ? 'completed' : ''}`}
-    >
-      <div className="habit-header">
-        <div className="habit-title-section">
-          <Headphones className="habit-icon" />
-          <div>
-            <h3 className="text-lg font-semibold">{habit.title}</h3>
+    <div className={`audio-habit-item ${completed ? 'completed' : ''}`}>
+      <div className="audio-habit-info">
+        <h4>{habit.title}</h4>
+        <p>{habit.description || 'No description available'}</p>
+        {completed && <span className="completed-badge">Completed</span>}
+      </div>
+      
+      <div className="audio-player">
+        <iframe
+          ref={iframeRef}
+          width="100%"
+          height="166"
+          scrolling="no"
+          frameBorder="no"
+          allow="autoplay"
+          src={`https://w.soundcloud.com/player/?url=${encodeURIComponent(habit.soundCloudUrl)}&color=%23ff5500&auto_play=false&hide_related=true&show_comments=false&show_user=true&show_reposts=false&show_teaser=false`}
+          title={habit.title}
+        ></iframe>
+        
+        <div className="audio-controls">
+          <button onClick={togglePlayPause} className="play-pause-btn">
+            {isPlaying ? 'Pause' : 'Play'}
+          </button>
+          <div className="progress-bar">
+            <div className="progress" style={{ width: `${progress}%` }}></div>
           </div>
-        </div>
-        {hasCompletedToday && (
-          <div className="completed-badge">
-            <CheckCircle className="check-icon" size={16} />
-            <span>Completed</span>
-          </div>
-        )}
-      </div>
-
-      <div className="audio-player-container">
-       <iframe
-            ref={iframeRef}
-            id={`sc-widget-${habit.id}`}
-            title={habit.title}
-            width="100%"
-            height="120"
-            scrolling="no"
-            frameBorder="no"
-            allow="autoplay; encrypted-media"
-            sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-presentation"
-            src={`https://w.soundcloud.com/player/?url=${encodeURIComponent(habit.audioUrl)}&color=%23ff5500&auto_play=false&hide_related=true&show_comments=false&show_user=true&show_reposts=false&show_teaser=false&visual=false`}
-            />
-      </div>
-
-      <div className="progress-section">
-        <div className="progress-bar">
-          <div 
-            className="progress-fill" 
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-        <div className="progress-info">
-          <span className="progress-text">{progress}%</span>
-          <span className="progress-requirement">
-            Goal: {habit.requiredListeningPercentage}%
-          </span>
-        </div>
-      </div>
-
-      <div className="mt-3">
-        <button
-          onClick={() => {
-            setShowHistory(!showHistory);
-            if (!showHistory) loadCompletionHistory();
-          }}
-          className="text-sm text-blue-600 hover:text-blue-700"
-        >
-          {showHistory ? 'Hide History' : 'Show History'}
-        </button>
-      </div>
-
-      {showHistory && (
-        <div className="mt-4 border-t pt-4">
-          <h4 className="text-sm font-semibold text-gray-700 mb-2">Recent Completions</h4>
-          {completionHistory.length > 0 ? (
-            <div className="space-y-2">
-              {completionHistory.map(record => (
-                <div key={record.id} className="text-sm text-gray-600 flex justify-between items-center">
-                  <div>
-                    {new Date(record.timestamp).toLocaleDateString()}
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span>{record.duration}s</span>
-                    <span>{record.percentageCompleted}%</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-gray-500">No completion history yet</p>
+          {!completed && (
+            <button 
+              onClick={handleComplete}
+              className="complete-btn"
+              disabled={completed}
+            >
+              Mark as Completed
+            </button>
           )}
         </div>
-      )}
+      </div>
 
-      {hasCompletedToday && (
-        <button 
-          className="reset-button mt-3"
-          onClick={handleReset}
-          title="Reset today's completion"
-        >
-          <RotateCcw size={16} />
-          Reset
-        </button>
-      )}
+      <style jsx>{`
+        .audio-habit-item {
+          border: 1px solid #e1e1e1;
+          border-radius: 8px;
+          padding: 15px;
+          margin-bottom: 20px;
+          background-color: #fff;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        
+        .audio-habit-item.completed {
+          background-color: #e6f7e6;
+          border-color: #a3d9a3;
+        }
+        
+        .audio-habit-info {
+          margin-bottom: 10px;
+        }
+        
+        .audio-habit-info h4 {
+          margin: 0 0 5px;
+          font-size: 18px;
+        }
+        
+        .audio-habit-info p {
+          margin: 0;
+          color: #666;
+          font-size: 14px;
+        }
+        
+        .completed-badge {
+          display: inline-block;
+          background-color: #4CAF50;
+          color: white;
+          font-size: 12px;
+          padding: 3px 8px;
+          border-radius: 12px;
+          margin-top: 5px;
+        }
+        
+        .audio-player {
+          margin-top: 10px;
+        }
+        
+        .audio-controls {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 10px;
+          margin-top: 10px;
+        }
+        
+        .play-pause-btn, .complete-btn {
+          padding: 6px 12px;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 14px;
+        }
+        
+        .play-pause-btn {
+          background-color: #ff5500;
+          color: white;
+        }
+        
+        .complete-btn {
+          background-color: #4CAF50;
+          color: white;
+          margin-left: auto;
+        }
+        
+        .complete-btn:disabled {
+          background-color: #cccccc;
+          cursor: not-allowed;
+        }
+        
+        .progress-bar {
+          flex: 1;
+          height: 8px;
+          background-color: #e1e1e1;
+          border-radius: 4px;
+          overflow: hidden;
+        }
+        
+        .progress {
+          height: 100%;
+          background-color: #ff5500;
+          transition: width 0.2s ease;
+        }
+      `}</style>
     </div>
   );
 };
-// Remove the old export default AudioHabitCard and replace with this:
-// Export both components
-export { WeeklyFeaturedAudios };
+// Export the wrapped component
 export default function WrappedAudioHabitCard(props) {
   return (
     <ErrorBoundary>

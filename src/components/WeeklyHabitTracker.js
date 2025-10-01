@@ -9,25 +9,47 @@ import {
   formatDateString,
   CUSTOM_WEEK_DAYS 
 } from '../utils/weekUtils';
-import { collection, query, where, getDocs, updateDoc, doc,deleteDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth, db } from '../services/firebase';
 import CustomHabitsModal from './CustomHabitsModal';
+import { ChevronLeft, ChevronRight, Plus, Trash2, Target, Star, LayoutGrid, Table } from 'lucide-react';
 
+const getHabitColorByPerformance = (percentage) => {
+  if (percentage >= 80) {
+    return 'from-green-400 to-emerald-500';
+  } else if (percentage >= 50) {
+    return 'from-amber-400 to-orange-500';
+  } else {
+    return 'from-red-400 to-rose-500';
+  }
+};
+
+const getContrastingTextColor = (percentage) => {
+  if (percentage >= 80) {
+    return 'text-gray-900';
+  } else if (percentage >= 50) {
+    return 'text-gray-900';
+  } else {
+    return 'text-white';
+  }
+};
 
 const getLeadershipGoalProgress = (habit, habitValues) => {
   if (habit.name !== 'Process Appointments') return null;
   
-  const goalStart = new Date('2024-09-01');
-  const goalEnd = new Date('2024-12-01');
-  const goalTarget = 75;
+  const goalStart = habit.goalConfig?.startDate 
+    ? new Date(habit.goalConfig.startDate)
+    : new Date('2024-09-01');
+  const goalEnd = habit.goalConfig?.endDate 
+    ? new Date(habit.goalConfig.endDate)
+    : new Date('2024-12-01');
+  const goalTarget = habit.goalConfig?.target || 75;
   
-  // Calculate total appointments from Sept 1 to Dec 1
   let totalAppointments = 0;
   const currentDate = new Date();
   const endDate = currentDate < goalEnd ? currentDate : goalEnd;
   
-  // Loop through all dates from Sept 1 to current date (or goal end)
   for (let date = new Date(goalStart); date <= endDate; date.setDate(date.getDate() + 1)) {
     const dateString = formatDateString(date);
     const key = `${habit.id}-${dateString}`;
@@ -55,18 +77,15 @@ const WeeklyHabitTracker = ({ habits = [], onRefreshHabits }) => {
   const [habitValues, setHabitValues] = useState({});
   const [loading, setLoading] = useState(false);
   const [isCustomHabitsModalOpen, setIsCustomHabitsModalOpen] = useState(false);
-  const [weekHistory, setWeekHistory] = useState([]);
-  const [showWeekPicker, setShowWeekPicker] = useState(false);
+  const [viewMode, setViewMode] = useState('capsules'); // 'capsules' or 'table'
 
   const weekDates = getCustomWeekDates(currentWeek);
   const weekRange = getWeekRangeString(currentWeek);
 
-  // Separate scoring and custom habits
-const validHabits = habits.filter(habit => habit && habit.id && habit.name);
-const scoringHabits = validHabits.filter(habit => !habit.isCustom);
-const customHabits = validHabits.filter(habit => habit.isCustom);
+  const validHabits = habits.filter(habit => habit && habit.id && habit.name);
+  const scoringHabits = validHabits.filter(habit => !habit.isCustom);
+  const customHabits = validHabits.filter(habit => habit.isCustom);
 
-  // Load weekly progress - memoized to prevent infinite re-renders
   const loadWeeklyProgress = useCallback(async () => {
     if (!user || habits.length === 0) return;
     
@@ -83,7 +102,6 @@ const customHabits = validHabits.filter(habit => habit.isCustom);
           const completedDates = habitData.completedDates || [];
           const completedValues = habitData.completedValues || {};
           
-          // Load current week data
           weekDates.forEach(date => {
             const dateString = formatDateString(date);
             const key = `${habit.id}-${dateString}`;
@@ -97,26 +115,21 @@ const customHabits = validHabits.filter(habit => habit.isCustom);
             }
           });
           
-          // For Process Appointments habit, also load ALL data from Sept 1 to Dec 1
           if (habit.name === 'Process Appointments') {
             const goalStart = new Date('2024-09-01');
             const goalEnd = new Date('2024-12-01');
             const currentDate = new Date();
             const endDate = currentDate < goalEnd ? currentDate : goalEnd;
             
-            // Load all dates from Sept 1 to current date for leadership goal calculation
             for (let date = new Date(goalStart); date <= endDate; date.setDate(date.getDate() + 1)) {
               const dateString = formatDateString(date);
               const key = `${habit.id}-${dateString}`;
               
-              // Only add if not already loaded (to avoid overwriting current week data)
               if (!(key in habitNumberValues)) {
                 const value = completedValues[dateString] || 0;
                 habitNumberValues[key] = value;
               }
             }
-            
-            console.log('🎯 Loaded Process Appointments data from Sept 1 to current date');       
           }
         }
       }
@@ -128,33 +141,10 @@ const customHabits = validHabits.filter(habit => habit.isCustom);
     } finally {
       setLoading(false);
     }
-  }, [user, habits, currentWeek]); // Remove weekDates dependency to prevent infinite loop
+  }, [user, habits, currentWeek]);
 
-  // Generate week history (last 12 weeks)
-  useEffect(() => {
-    const generateWeekHistory = () => {
-      const weeks = [];
-      let currentDate = new Date();
-      
-      for (let i = 0; i < 12; i++) {
-        weeks.push({
-          date: new Date(currentDate),
-          range: getWeekRangeString(currentDate),
-          isCurrentWeek: isCurrentWeek(currentDate)
-        });
-        currentDate = getPreviousWeek(currentDate);
-      }
-      
-      setWeekHistory(weeks);
-    };
-    
-    generateWeekHistory();
-  }, []);
-
-  // Load completed habits for the current week - now includes loadWeeklyProgress
   useEffect(() => {
     if (!user || habits.length === 0) return;
-    
     loadWeeklyProgress();
   }, [user, habits, currentWeek, loadWeeklyProgress]);
 
@@ -165,16 +155,8 @@ const customHabits = validHabits.filter(habit => habit.isCustom);
     const key = `${habit.id}-${dateString}`;
     const numValue = parseInt(value) || 0;
     
-    // Update local state
-    setHabitValues(prev => ({
-      ...prev,
-      [key]: numValue
-    }));
-    
-    setCompletedHabits(prev => ({
-      ...prev,
-      [key]: numValue >= (habit.target || 1)
-    }));
+    setHabitValues(prev => ({ ...prev, [key]: numValue }));
+    setCompletedHabits(prev => ({ ...prev, [key]: numValue >= (habit.target || 1) }));
 
     try {
       const habitDoc = await getDocs(query(collection(db, 'habits'), where('__name__', '==', habit.id)));
@@ -184,10 +166,8 @@ const customHabits = validHabits.filter(habit => habit.isCustom);
         let completedDates = habitData.completedDates || [];
         let completedValues = habitData.completedValues || {};
         
-        // Update the value for this date
         completedValues[dateString] = numValue;
         
-        // Update completed dates based on target
         const isCompleted = numValue >= (habit.target || 1);
         if (isCompleted && !completedDates.includes(dateString)) {
           completedDates.push(dateString);
@@ -206,41 +186,32 @@ const customHabits = validHabits.filter(habit => habit.isCustom);
       console.error('Error updating habit:', error);
     }
   };
-// Add this function to the WeeklyHabitTracker component
-const deleteCustomHabit = async (habit) => {
-  if (!user || !habit || !habit.isCustom) return;
 
-  // Confirm deletion
-  if (!window.confirm(`Are you sure you want to delete the habit "${habit.name}"?`)) {
-    return;
-  }
+  const deleteCustomHabit = async (habit) => {
+    if (!user || !habit || !habit.isCustom) return;
 
-  try {
-    // Delete from Firestore
-    await deleteDoc(doc(db, 'habits', habit.id));
-    
-    // Optimistically update UI by filtering out this habit
-    onRefreshHabits && onRefreshHabits();
-    
-    // Show success message
-    alert(`Habit "${habit.name}" has been deleted.`);
-  } catch (error) {
-    console.error('Error deleting habit:', error);
-    alert('Failed to delete habit. Please try again.');
-  }
-};
-const toggleHabitCompletion = async (habit, date) => {
-    if (!user || habit.type === 'number') return; // Don't use toggle for number habits
+    if (!window.confirm(`Are you sure you want to delete the habit "${habit.name}"?`)) {
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'habits', habit.id));
+      onRefreshHabits && onRefreshHabits();
+      alert(`Habit "${habit.name}" has been deleted.`);
+    } catch (error) {
+      console.error('Error deleting habit:', error);
+      alert('Failed to delete habit. Please try again.');
+    }
+  };
+
+  const toggleHabitCompletion = async (habit, date) => {
+    if (!user || habit.type === 'number') return;
     
     const dateString = formatDateString(date);
     const key = `${habit.id}-${dateString}`;
     const isCurrentlyCompleted = completedHabits[key];
     
-    // Optimistic update
-    setCompletedHabits(prev => ({
-      ...prev,
-      [key]: !isCurrentlyCompleted
-    }));
+    setCompletedHabits(prev => ({ ...prev, [key]: !isCurrentlyCompleted }));
 
     try {
       const habitDoc = await getDocs(query(collection(db, 'habits'), where('__name__', '==', habit.id)));
@@ -250,10 +221,8 @@ const toggleHabitCompletion = async (habit, date) => {
         let completedDates = habitData.completedDates || [];
         
         if (isCurrentlyCompleted) {
-          // Remove date
           completedDates = completedDates.filter(d => d !== dateString);
         } else {
-          // Add date
           if (!completedDates.includes(dateString)) {
             completedDates.push(dateString);
           }
@@ -267,38 +236,21 @@ const toggleHabitCompletion = async (habit, date) => {
       }
     } catch (error) {
       console.error('Error updating habit:', error);
-      // Revert optimistic update
-      setCompletedHabits(prev => ({
-        ...prev,
-        [key]: isCurrentlyCompleted
-      }));
+      setCompletedHabits(prev => ({ ...prev, [key]: isCurrentlyCompleted }));
     }
-  };
-
-  const getCompletionPercentage = (habit) => {
-    let completed = 0;
-    weekDates.forEach(date => {
-      const dateString = formatDateString(date);
-      const key = `${habit.id}-${dateString}`;
-      if (completedHabits[key]) completed++;
-    });
-    return Math.round((completed / 7) * 100);
   };
 
   const getDailyScore = (date) => {
     const dateString = formatDateString(date);
     let score = 0;
     
-    // Only include scoring habits (not custom habits)
     scoringHabits.forEach(habit => {
       const key = `${habit.id}-${dateString}`;
       
       if (habit.type === 'number') {
-        // For number habits, add the actual value
         const value = habitValues[key] || 0;
         score += value;
       } else {
-        // For boolean habits, add 1 point if completed
         if (completedHabits[key]) {
           score += 1;
         }
@@ -316,583 +268,453 @@ const toggleHabitCompletion = async (habit, date) => {
     return totalScore;
   };
 
-  const getMaxPossibleDailyScore = () => {
-    let maxScore = 0;
-    // Only calculate for scoring habits
-    scoringHabits.forEach(habit => {
+  const getHabitWeekProgress = (habit) => {
+    return weekDates.filter(date => {
+      const key = `${habit.id}-${formatDateString(date)}`;
       if (habit.type === 'number') {
-        maxScore += Math.max(habit.target * 2, 10);
-      } else {
-        maxScore += 1;
+        return (habitValues[key] || 0) > 0;
       }
-    });
-    return maxScore;
+      return completedHabits[key];
+    }).length;
+  };
+// Add function to get daily score for a specific habit (after getHabitCompletionPercentage function)
+const getHabitDailyScore = (habit, date) => {
+  const dateString = formatDateString(date);
+  const key = `${habit.id}-${dateString}`;
+  
+  if (habit.type === 'number') {
+    return habitValues[key] || 0;
+  } else {
+    return completedHabits[key] ? 1 : 0;
+  }
+};
+  const getHabitCompletionPercentage = (habit) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const daysElapsed = weekDates.filter(date => {
+      const checkDate = new Date(date);
+      checkDate.setHours(0, 0, 0, 0);
+      return checkDate <= today;
+    }).length;
+    
+    if (daysElapsed === 0) return 0;
+    
+    const completedDays = weekDates.filter(date => {
+      const checkDate = new Date(date);
+      checkDate.setHours(0, 0, 0, 0);
+      if (checkDate > today) return false;
+      
+      const key = `${habit.id}-${formatDateString(date)}`;
+      if (habit.type === 'number') {
+        return (habitValues[key] || 0) > 0;
+      }
+      return completedHabits[key];
+    }).length;
+    
+    return Math.round((completedDays / daysElapsed) * 100);
   };
 
-  const getMaxPossibleWeeklyScore = () => {
-    return getMaxPossibleDailyScore() * 7;
-  };
+  const HabitCard = ({ habit, isCustom }) => {
+    const progress = getHabitWeekProgress(habit);
+    const completionPercentage = getHabitCompletionPercentage(habit);
+    const cardColor = getHabitColorByPerformance(completionPercentage);
+    const textColor = getContrastingTextColor(completionPercentage);
+    const goalProgress = getLeadershipGoalProgress(habit, habitValues);
 
-  return (
-    <div className="max-w-6xl mx-auto p-3 sm:p-6">
-      {/* Week Navigation with History - Mobile Optimized */}
-      <div className="week-navigation">
-        <button
-          onClick={() => setCurrentWeek(getPreviousWeek(currentWeek))}
-          className="flex items-center px-2 sm:px-4 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors text-sm"
-        >
-          <span className="mr-1 sm:mr-2">←</span>
-          <span className="hidden sm:inline">Previous Week</span>
-          <span className="sm:hidden">Prev</span>
-        </button>
-        
-        <div className="text-center relative">
-          <button
-            onClick={() => setShowWeekPicker(!showWeekPicker)}
-            className="week-title font-bold text-gray-800 hover:text-blue-600 cursor-pointer px-2"
-          >
-            <span className="hidden sm:inline text-2xl">Week of {weekRange}</span>
-            <span className="sm:hidden text-lg">{weekRange}</span>
-            <span className="ml-2 text-sm">📅</span>
-          </button>
-          {isCurrentWeek(currentWeek) && (
-            <span className="text-xs sm:text-sm text-blue-600 font-medium block">Current Week</span>
-          )}
-          
-          {/* Week Picker Dropdown - Mobile Optimized */}
-          {showWeekPicker && (
-            <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 bg-white border border-gray-200 rounded-lg shadow-lg z-10 w-56 sm:w-64">
-              <div className="p-3 border-b border-gray-200">
-                <h3 className="font-semibold text-gray-800 text-sm sm:text-base">Select Week</h3>
-              </div>
-              <div className="max-h-64 overflow-y-auto">
-                {weekHistory.map((week, index) => (
-                  <button
-                    key={index}
-                    onClick={() => {
-                      setCurrentWeek(week.date);
-                      setShowWeekPicker(false);
-                    }}
-                    className={`w-full text-left px-4 py-2 hover:bg-gray-50 text-sm ${
-                      week.isCurrentWeek ? 'bg-blue-50 text-blue-600 font-medium' : ''
-                    } ${
-                      getWeekRangeString(week.date) === weekRange ? 'bg-gray-100' : ''
-                    }`}
-                  >
-                    <div>{week.range}</div>
-                    {week.isCurrentWeek && (
-                      <div className="text-xs text-blue-500">Current Week</div>
-                    )}
-                  </button>
-                ))}
-              </div>
+    return (
+      <div className={`flex-shrink-0 w-80 rounded-3xl p-6 shadow-xl bg-gradient-to-br ${cardColor}`}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="bg-white/30 backdrop-blur-sm rounded-2xl p-3 shadow-lg">
+              <span className="text-4xl">{habit.icon}</span>
             </div>
+            <div>
+              <h3 className={`font-bold text-lg drop-shadow-md ${textColor}`}>
+                {habit.name}
+              </h3>
+              {habit.type === 'number' && (
+                <p className={`text-xs font-medium ${textColor === 'text-white' ? 'text-white/80' : 'text-gray-700'}`}>
+                  Target: {habit.target} {habit.unit}
+                </p>
+              )}
+            </div>
+          </div>
+          {isCustom && (
+            <button 
+              onClick={() => deleteCustomHabit(habit)}
+              className={`${textColor === 'text-white' ? 'text-white/70 hover:text-white' : 'text-gray-700 hover:text-gray-900'} transition p-2 bg-white/20 rounded-xl`}
+            >
+              <Trash2 size={18} />
+            </button>
           )}
         </div>
-        
-        <button
-          onClick={() => setCurrentWeek(getNextWeek(currentWeek))}
-          className="flex items-center px-2 sm:px-4 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors text-sm"
-        >
-          <span className="hidden sm:inline">Next Week</span>
-          <span className="sm:hidden">Next</span>
-          <span className="ml-1 sm:ml-2">→</span>
-        </button>
-      </div>
 
-      {/* Action Buttons - Mobile Optimized */}
-      <div className="flex flex-col sm:flex-row justify-center gap-2 sm:gap-3 mb-4">
-        {!isCurrentWeek(currentWeek) && (
-          <button
-            onClick={() => setCurrentWeek(new Date())}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
-          >
-            Go to Current Week
-          </button>
-        )}
-        <button
-          onClick={() => setIsCustomHabitsModalOpen(true)}
-          className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center text-sm"
-        >
-          <span className="mr-2">⭐</span>
-          Add Custom Habit 
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="text-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-2 text-gray-600 text-sm sm:text-base">Loading habits...</p>
+        <div className="mb-5 bg-white/20 backdrop-blur-sm rounded-2xl p-3">
+          <div className="flex justify-between text-sm mb-2">
+            <span className={`${textColor} font-semibold`}>
+              {progress}/7 days
+            </span>
+            <span className={`${textColor} font-bold`}>
+              {completionPercentage}%
+            </span>
+          </div>
+          <div className="w-full bg-white/30 rounded-full h-3 overflow-hidden">
+            <div 
+              className="h-3 bg-white rounded-full shadow-inner transition-all duration-500"
+              style={{ width: `${completionPercentage}%` }}
+            />
+          </div>
+          <div className={`text-xs mt-1 text-center font-medium ${textColor === 'text-white' ? 'text-white/90' : 'text-gray-700'}`}>
+            Based on days elapsed this week
+          </div>
         </div>
-      ) : (
-        <>
-          {/* Overall Score Card - Mobile Optimized */}
-          <div className="score-card mb-4 sm:mb-6">
-            <div className="score-card-content flex flex-col sm:flex-row sm:items-center sm:justify-between">
-              <div className="score-card-main mb-4 sm:mb-0 text-center sm:text-left">
-                <h3 className="text-xl sm:text-2xl font-bold mb-2">🏆 Weekly Score</h3>
-                <div className="text-2xl sm:text-4xl font-bold">{getWeeklyScore()} Points</div>
-                <div className="text-blue-100 mt-1 text-sm">
-                  Week of {weekRange}
+
+        {goalProgress && goalProgress.isActive && (
+          <div className="mb-4 bg-white/20 backdrop-blur-sm rounded-2xl p-3">
+            <div className={`text-xs font-bold mb-2 ${textColor}`}>🎯 Leadership Goal</div>
+            <div className={`flex justify-between text-sm mb-1 ${textColor}`}>
+              <span>{goalProgress.total}/{goalProgress.target}</span>
+              <span className="font-bold">{Math.round(goalProgress.progress)}%</span>
+            </div>
+            <div className="w-full bg-white/30 rounded-full h-2">
+              <div 
+                className="h-2 bg-yellow-300 rounded-full transition-all"
+                style={{ width: `${goalProgress.progress}%` }}
+              />
+            </div>
+            <div className={`text-xs mt-1 font-medium ${textColor === 'text-white' ? 'text-white/90' : 'text-gray-700'}`}>
+              {goalProgress.remaining} needed • {goalProgress.daysRemaining} days left
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-7 gap-2">
+          {weekDates.map((date, index) => {
+            const key = `${habit.id}-${formatDateString(date)}`;
+            const isCompleted = habit.type === 'number' 
+              ? (habitValues[key] || 0) >= (habit.target || 1)
+              : completedHabits[key];
+            const isTodayDate = isToday(date);
+            const value = habitValues[key] || 0;
+            const dailyScore = getHabitDailyScore(habit, date);
+
+            return (
+              <div key={index} className="flex flex-col items-center gap-1.5">
+                <div className={`text-xs font-bold ${
+                  isTodayDate ? 'text-blue-600' : textColor === 'text-white' ? 'text-white/80' : 'text-gray-700'
+                }`}>
+                  {CUSTOM_WEEK_DAYS[index].short}
                 </div>
-                {scoringHabits.length !== habits.length && (
-                  <div className="text-blue-200 text-xs sm:text-sm mt-1">
-                    *Score includes {scoringHabits.length} scoring habits only
+                <div className={`text-lg font-bold ${
+                  isTodayDate ? 'text-blue-600 scale-110' : textColor
+                }`}>
+                  {date.getDate()}
+                </div>
+                
+                {habit.type === 'number' ? (
+                  <div className="flex flex-col items-center gap-1">
+                    <input
+                      type="number"
+                      min="0"
+                      max="99"
+                      value={value}
+                      onChange={(e) => updateHabitValue(habit, date, e.target.value)}
+                      className="w-11 h-11 text-center text-base font-bold border-2 rounded-xl focus:outline-none focus:ring-2 transition shadow-md border-slate-400 bg-white text-slate-700 focus:ring-slate-400"
+                    />
+                    {isCompleted && (
+                      <span className={`text-xs font-bold drop-shadow-lg ${textColor}`}>✓</span>
+                    )}
+                    {/* Add daily score under the input */}
+                    {!habit.isCustom && dailyScore > 0 && (
+                      <div className={`text-xs font-bold ${textColor === 'text-white' ? 'text-white/90' : 'text-gray-700'}`}>
+                        {dailyScore} pts
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => toggleHabitCompletion(habit, date)}
+                      className={`w-11 h-11 rounded-xl border-2 flex items-center justify-center text-lg font-bold transition-all active:scale-90 shadow-md ${
+                        isCompleted
+                          ? 'bg-slate-600 border-slate-600 text-white'
+                          : isTodayDate
+                          ? 'border-slate-400 bg-slate-50 hover:bg-slate-100 text-slate-500'
+                          : 'border-slate-300 bg-white hover:bg-slate-50 text-slate-400'
+                      }`}
+                    >
+                      {isCompleted && '✓'}
+                    </button>
+                    {/* Add daily score under the button */}
+                    {!habit.isCustom && dailyScore > 0 && (
+                      <div className={`text-xs font-bold ${textColor === 'text-white' ? 'text-white/90' : 'text-gray-700'}`}>
+                        {dailyScore} pts
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-              <div className="score-card-stats text-center sm:text-right">
-                <div className="text-lg sm:text-xl font-semibold">
-                  {Math.round((getWeeklyScore() / Math.max(getMaxPossibleWeeklyScore(), 1)) * 100)}%
-                </div>
-                <div className="text-blue-100 text-sm">
-                  of max possible
-                </div>
-                <div className="text-blue-100 text-xs mt-2">
-                  Max: {getMaxPossibleWeeklyScore()} pts
-                </div>
-              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-violet-100 via-pink-100 to-orange-100">
+      <div className="sticky top-0 bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 shadow-2xl z-40">
+        <div className="p-5">
+          <div className="flex items-center justify-between mb-4">
+            <button
+              onClick={() => setCurrentWeek(getPreviousWeek(currentWeek))}
+              className="p-2.5 bg-white/20 hover:bg-black/30 rounded-2xl transition active:scale-95 backdrop-blur-sm"
+            >
+              <ChevronLeft size={24} className="text-black" />
+            </button>
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-black drop-shadow-lg">{weekRange}</h1>
+              <p className="text-xs text-white/80 font-medium">Saturday - Friday</p>
             </div>
-            
-            {/* Daily breakdown - Mobile Optimized */}
-            <div className="daily-breakdown">
-              {weekDates.map((date, index) => {
-                const dailyScore = getDailyScore(date);
-                const maxDaily = getMaxPossibleDailyScore();
-                const percentage = Math.round((dailyScore / Math.max(maxDaily, 1)) * 100);
-                
-                return (
-                  <div key={date.toISOString()} className="daily-breakdown-item bg-white bg-opacity-20 rounded-lg p-1 sm:p-2">
-                    <div className="text-xs font-medium">
-                      {CUSTOM_WEEK_DAYS[index].short}
-                    </div>
-                    <div className="daily-breakdown-score text-sm sm:text-lg font-bold">
-                      {dailyScore}
-                    </div>
-                    <div className="text-xs opacity-80">
-                      {percentage}%
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <button
+              onClick={() => setCurrentWeek(getNextWeek(currentWeek))}
+              className="p-2.5 bg-white/20 hover:bg-black/30 rounded-2xl transition active:scale-95 backdrop-blur-sm"
+            >
+              <ChevronRight size={24} className="text-black" />
+            </button>
           </div>
 
-          {/* Habits Section Headers */}
-          {scoringHabits.length > 0 && (
+        <div className="bg-white rounded-3xl p-6 shadow-xl border-2 border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-1">Weekly Score</p>
+              <p className="text-6xl font-black text-gray-800">{getWeeklyScore()}</p>
+              <p className="text-sm text-gray-500 mt-1">points earned</p>
+            </div>
+            <button 
+              onClick={() => setIsCustomHabitsModalOpen(true)}
+              className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition active:scale-95 flex items-center gap-2 shadow-md"
+            >
+              <Plus size={18} />
+              Add
+            </button>
+          </div>
+        </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent mx-auto"></div>
+          <p className="mt-4 text-gray-600 font-medium">Loading habits...</p>
+        </div>
+      ) : (
+        <div className="p-5">
+          {!isCurrentWeek(currentWeek) && (
             <div className="mb-4">
-              <h3 className="text-base sm:text-lg font-semibold text-gray-800 flex flex-wrap items-center">
-                <span className="mr-2">🎯</span>
-                Scoring Habits
-                <span className="ml-2 text-xs sm:text-sm bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
-                  Counts toward score
-                </span>
-              </h3>
+              <button
+                onClick={() => setCurrentWeek(new Date())}
+                className="w-full bg-blue-600 text-white py-3 rounded-2xl font-bold hover:bg-blue-700 transition active:scale-95 shadow-lg"
+              >
+                Go to Current Week
+              </button>
             </div>
           )}
+          
+          <div className="mb-6 flex gap-3">
+            <button
+              onClick={() => setIsCustomHabitsModalOpen(true)}
+              className="flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-2xl font-bold hover:shadow-2xl transition active:scale-95 flex items-center justify-center gap-3 text-lg shadow-lg"
+            >
+              <Plus size={24} />
+              Add Custom Habit
+            </button>
+            
+            <button
+              onClick={() => setViewMode(viewMode === 'capsules' ? 'table' : 'capsules')}
+              className="bg-white text-gray-700 px-6 py-4 rounded-2xl font-bold hover:shadow-lg transition active:scale-95 flex items-center gap-2 border-2 border-gray-200"
+            >
+              {viewMode === 'capsules' ? <Table size={24} /> : <LayoutGrid size={24} />}
+              <span className="hidden sm:inline">{viewMode === 'capsules' ? 'Table' : 'Cards'}</span>
+            </button>
+          </div>
 
-          {/* Scoring Habits Grid - Mobile Optimized */}
-          {scoringHabits.length > 0 && (
-            <div className="habits-grid mb-6">
-              <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-                <div className="habits-table overflow-x-auto">
-                  <table className="w-full min-w-[800px] sm:min-w-full">
-                    {/* Header Row */}
-                    <thead>
-                      <tr className="bg-gray-50 border-b">
-                        <th className="p-2 sm:p-4 font-semibold text-gray-700 text-left text-xs sm:text-sm">Habits</th>
-                        {weekDates.map((date, index) => (
-                          <th key={date.toISOString()} className="p-2 sm:p-4 text-center min-w-[60px]">
-                            <div className="font-semibold text-gray-700 text-xs sm:text-sm">
-                              {CUSTOM_WEEK_DAYS[index].short}
-                            </div>
-                            <div className={`text-xs mt-1 ${
-                              isToday(date) 
-                                ? 'text-white bg-blue-600 font-bold px-2 py-1 rounded-full border-2 border-blue-600' 
-                                : 'text-gray-500'
-                            }`}                                                                                                      
-                            >
+          {viewMode === 'capsules' ? (
+            <>
+              {scoringHabits.length > 0 && (
+                <div className="mb-8">
+                  <div className="flex items-center gap-3 mb-4 px-1">
+                    <div className="bg-gradient-to-r from-blue-500 to-cyan-500 p-2.5 rounded-xl shadow-lg">
+                      <Target size={22} className="text-white" />
+                    </div>
+                    <h2 className="font-black text-gray-800 text-xl">Scoring Habits</h2>
+                    <span className="text-xs bg-gradient-to-r from-blue-500 to-cyan-500 text-white px-3 py-1.5 rounded-full font-bold shadow-md">
+                      Earns Points
+                    </span>
+                  </div>
+                  <div className="flex gap-5 overflow-x-auto pb-5 snap-x snap-mandatory scrollbar-hide">
+                    {scoringHabits.map(habit => (
+                      <HabitCard key={habit.id} habit={habit} isCustom={false} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {customHabits.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-3 mb-4 px-1">
+                    <div className="bg-gradient-to-r from-amber-400 to-orange-500 p-2.5 rounded-xl shadow-lg">
+                      <Star size={22} className="text-white" />
+                    </div>
+                    <h2 className="font-black text-gray-800 text-xl">Custom Habits</h2>
+                    <span className="text-xs bg-gradient-to-r from-amber-400 to-orange-500 text-white px-3 py-1.5 rounded-full font-bold shadow-md">
+                      Personal
+                    </span>
+                  </div>
+                  <div className="flex gap-5 overflow-x-auto pb-5 snap-x snap-mandatory scrollbar-hide">
+                    {customHabits.map(habit => (
+                      <HabitCard key={habit.id} habit={habit} isCustom={true} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b-2 border-gray-200">
+                    <tr>
+                      <th className="p-4 text-left font-semibold text-gray-700 min-w-[200px]">Habit</th>
+                      {weekDates.map((date, index) => (
+                        <th key={index} className="p-4 text-center min-w-[80px]">
+                          <div className="text-sm font-semibold text-gray-700">{CUSTOM_WEEK_DAYS[index].short}</div>
+                          <div className={`text-xs mt-1 ${isToday(date) ? 'text-blue-600 font-bold' : 'text-gray-500'}`}>
                             {date.getDate()}
-                            </div>
-                            {isToday(date) && (
-                              <div className="w-2 h-2 bg-blue-600 rounded-full mx-auto mt-1 animate-pulse"></div>
-                            )}
-                            <div className="text-xs text-green-600 font-semibold mt-1">
-                              {getDailyScore(date)} pts
-                            </div>
-                          </th>
-                        ))}
-                        <th className="p-2 sm:p-4 text-center bg-blue-50 border-l min-w-[80px]">
-                          <div className="font-semibold text-blue-700 text-xs sm:text-sm">Weekly</div>
-                          <div className="text-xs text-blue-600 mt-1">Total</div>
-                          <div className="text-sm sm:text-lg font-bold text-blue-700 mt-1">
-                            {getWeeklyScore()}
-                          </div>
-                          <div className="text-xs text-blue-500">
-                            points
                           </div>
                         </th>
-                      </tr>
-                    </thead>
+                      ))}
+                      <th className="p-4 text-center bg-blue-50 min-w-[100px]">
+                        <div className="text-sm font-semibold text-blue-700">Weekly</div>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {validHabits.map((habit) => {
+                      const progress = getHabitWeekProgress(habit);
+                      const weeklyTotal = habit.type === 'number' 
+                        ? weekDates.reduce((sum, date) => sum + (habitValues[`${habit.id}-${formatDateString(date)}`] || 0), 0)
+                        : progress;
 
-                    {/* Habit Rows */}
-                    <tbody>
-                      {scoringHabits.length === 0 ? (
-                        <tr>
-                          <td colSpan="9" className="p-6 sm:p-8 text-center text-gray-500">
-                            <p>No scoring habits added yet.</p>
-                            <p className="text-xs sm:text-sm mt-1">Add some predefined habits to start scoring!</p>
-                          </td>
-                        </tr>
-                      ) : (
-                         scoringHabits
-                        .filter(habit => habit && habit.id) // Add this filter to be extra safe
-                        .map((habit) => (
-                          <tr key={habit.id} className="border-b last:border-b-0 hover:bg-gray-50">
-                            <td className="p-2 sm:p-4 min-w-[200px]">
-                              <div className="flex items-center">
-                                <span className="text-lg sm:text-xl mr-2 sm:mr-3">{habit.icon}</span>
-                                <div>
-                                  <div className="font-medium text-gray-800 text-xs sm:text-sm">
-                                    {habit.name}
-                                  </div>
-                                  <div className="text-xs text-gray-500">
-                                    {getCompletionPercentage(habit)}% this week
-                                  </div>
-                                  {habit.type === 'number' && (
-                                    <div className="text-xs text-blue-600 mt-1">
-                                      Target: {habit.target} {habit.unit}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                            
-                            {weekDates.map((date) => {
-                              const dateString = formatDateString(date);
-                              const key = `${habit.id}-${dateString}`;
-                              const isCompleted = completedHabits[key];
-                              const isDateToday = isToday(date);
-                              const currentValue = habitValues[key] || 0;
-                              
-                              return (
-                                <td key={dateString} className="p-2 sm:p-4 text-center min-w-[60px]">
-                                  {habit.type === 'number' ? (
-                                    <div className="flex flex-col items-center">
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        max="99"
-                                        value={currentValue}
-                                        onChange={(e) => updateHabitValue(habit, date, e.target.value)}
-                                        className={`w-10 sm:w-12 h-6 sm:h-8 text-center text-xs sm:text-sm border rounded ${
-                                          isCompleted
-                                            ? 'border-green-500 bg-green-50 text-green-700'
-                                            : isDateToday
-                                            ? 'border-blue-400 bg-blue-50'
-                                            : 'border-gray-300'
-                                        } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
-                                        title={`${habit.name} - ${date.toLocaleDateString()} (Target: ${habit.target})`}
-                                      />
-                                      {isCompleted && (
-                                        <div className="text-green-500 text-xs mt-1">✓</div>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <button
-                                      onClick={() => toggleHabitCompletion(habit, date)}
-                                      className={`w-6 sm:w-8 h-6 sm:h-8 rounded-full border-2 flex items-center justify-center transition-all ${
-                                        isCompleted
-                                          ? 'bg-green-500 border-green-500 text-white hover:bg-green-600'
-                                          : isDateToday
-                                          ? 'border-blue-400 hover:border-blue-500 hover:bg-blue-50'
-                                          : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'
-                                      }`}
-                                      title={`${habit.name} - ${date.toLocaleDateString()}`}
-                                    >
-                                      {isCompleted && <span className="text-xs">✓</span>}
-                                    </button>
-                                  )}
-                                </td>
-                              );
-                            })}
-                            
-                            {/* Weekly total for this habit */}
-                            <td className="p-2 sm:p-4 text-center bg-gray-50 border-l min-w-[80px]">
-                              <div className="text-xs sm:text-sm font-medium text-gray-700">
-                                {habit.type === 'number' ? (
-                                  weekDates.reduce((sum, date) => {
-                                    const key = `${habit.id}-${formatDateString(date)}`;
-                                    return sum + (habitValues[key] || 0);
-                                  }, 0)
-                                ) : (
-                                  weekDates.reduce((sum, date) => {
-                                    const key = `${habit.id}-${formatDateString(date)}`;
-                                    return sum + (completedHabits[key] ? 1 : 0);
-                                  }, 0)
+                      return (
+                        <tr key={habit.id} className="border-b hover:bg-gray-50">
+                          <td className="p-4">
+                            <div className="flex items-center gap-3">
+                              <span className="text-2xl">{habit.icon}</span>
+                              <div>
+                                <div className="font-medium text-gray-800">{habit.name}</div>
+                                {habit.type === 'number' && (
+                                  <div className="text-xs text-gray-500">Target: {habit.target} {habit.unit}</div>
                                 )}
                               </div>
-                              <div className="text-xs text-gray-500">
-                                {habit.type === 'number' ? habit.unit : 'days'}
-                              </div>
-                              {/* Leadership Goal Progress for Process Appointments */}
-                                {(() => {
-                                  const goalProgress = getLeadershipGoalProgress(habit, habitValues);
-                                  if (goalProgress && goalProgress.isActive) {
-                                    return (
-                                      <div className="mt-2 pt-2 border-t border-gray-300">
-                                        <div className="text-xs font-semibold text-purple-700">
-                                          Leadership Goal
-                                        </div>
-                                        <div className="text-xs text-purple-600">
-                                          {goalProgress.total}/{goalProgress.target}
-                                        </div>
-                                        <div className="text-xs text-red-600 font-medium">
-                                          {goalProgress.remaining} needed
-                                        </div>
-                                        <div className="text-xs text-gray-500">
-                                          {goalProgress.daysRemaining} days left
-                                        </div>
-                                        <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
-                                          <div 
-                                            className="bg-purple-600 h-1.5 rounded-full transition-all"
-                                            style={{ width: `${goalProgress.progress}%` }}
-                                          ></div>
-                                        </div>
-                                      </div>
-                                    );
-                                  }
-                                  return null;
-                                })()}
-                              </td>
-                            
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Custom Habits Section - Mobile Optimized */}
-          {customHabits.length > 0 && (
-            <>
-              <div className="mb-4 mt-6 sm:mt-8">
-                <h3 className="text-base sm:text-lg font-semibold text-gray-600 flex flex-wrap items-center">
-                  <span className="mr-2">⭐</span>
-                  Custom Habits
-                  <span className="ml-2 text-xs sm:text-sm bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
-                    Personal tracking only
-                  </span>
-                </h3>
-              </div>
-
-              <div className="bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[800px] sm:min-w-full">
-                    {/* Custom Habits Header */}
-                    <thead>
-                      <tr className="bg-gray-100 border-b border-gray-300">
-                        <th className="p-2 sm:p-4 font-medium text-gray-600 text-left text-xs sm:text-sm">Custom Habits</th>
-                        {weekDates.map((date, index) => (
-                          <th key={date.toISOString()} className="p-2 sm:p-4 text-center min-w-[60px]">
-                            <div className="font-medium text-gray-600 text-xs">
-                              {CUSTOM_WEEK_DAYS[index].short}
-                            </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              {date.getDate()}
-                            </div>
-                          </th>
-                        ))}
-                        <th className="p-2 sm:p-4 text-center bg-gray-200 border-l border-gray-300 min-w-[80px]">
-                          <div className="font-medium text-gray-600 text-xs">Weekly</div>
-                          <div className="text-xs text-gray-500 mt-1">Total</div>
-                        </th>
-                      </tr>
-                    </thead>
-
-                    {/* Custom Habits Rows */}
-                    <tbody>
-                      {customHabits
-                      .filter(habit => habit && habit.id) // Add this filter 
-                      .map((habit) => (
-                        <tr key={habit.id} className="border-b last:border-b-0 border-gray-300 hover:bg-gray-100">
-                          <td className="p-2 sm:p-4 min-w-[200px]">
-                            <div className="flex items-center justify-between">
-
-                              <div className="flex items-center">
-                                <span className="text-lg sm:text-xl mr-2 sm:mr-3 opacity-70">{habit.icon}</span>
-                                <div>
-                                  <div className="font-medium text-gray-700 text-xs sm:text-sm">
-                                    {habit.name}
-                                  </div>
-                                  <div className="text-xs text-gray-400">
-                                    {getCompletionPercentage(habit)}% this week
-                                  </div>
-                                  {habit.type === 'number' && (
-                                    <div className="text-xs text-gray-500 mt-1">
-                                      Target: {habit.target} {habit.unit}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                              deleteCustomHabit(habit);
-                              }}
-                              className="text-red-400 hover:text-red-600 transition-colors p-1"
-                              title="Delete this habit"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" className="bi bi-trash" viewBox="0 0 16 16">
-                                <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5Zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5Zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6Z"/>
-                                <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1ZM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118ZM2.5 3h11V2h-11v1Z"/>
-                                </svg>
-                              </button>
                             </div>
                           </td>
-                          
-                          {weekDates.map((date) => {
-                            const dateString = formatDateString(date);
-                            const key = `${habit.id}-${dateString}`;
+                          {weekDates.map((date, index) => {
+                            const key = `${habit.id}-${formatDateString(date)}`;
                             const isCompleted = completedHabits[key];
-                            const isDateToday = isToday(date);
-                            const currentValue = habitValues[key] || 0;
-                            console.log('Custom Habit Value:', isDateToday, date, isToday(date));
+                            const value = habitValues[key] || 0;
+                            const isTodayDate = isToday(date);
 
                             return (
-                              <td key={dateString} className="p-2 sm:p-4 text-center min-w-[60px]">
+                              <td key={index} className="p-4 text-center">
                                 {habit.type === 'number' ? (
-                                  <div className="flex flex-col items-center">
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      max="99"
-                                      value={currentValue}
-                                      onChange={(e) => updateHabitValue(habit, date, e.target.value)}
-                                      className={`w-10 sm:w-12 h-6 sm:h-8 text-center text-xs sm:text-sm border rounded ${
-                                        isCompleted
-                                          ? 'border-gray-400 bg-gray-100 text-gray-600'
-                                          : isDateToday
-                                          ? 'border-gray-400 bg-gray-50'
-                                          : 'border-gray-300 bg-white'
-                                      } focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400`}
-                                      title={`${habit.name} - ${date.toLocaleDateString()} (Target: ${habit.target})`}
-                                    />
-                                    {isCompleted && (
-                                      <div className="text-gray-500 text-xs mt-1">✓</div>
-                                    )}
-                                  </div>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="99"
+                                    value={value}
+                                    onChange={(e) => updateHabitValue(habit, date, e.target.value)}
+                                    className={`w-16 text-center text-sm font-bold border-2 rounded-lg focus:outline-none focus:ring-2 transition ${
+                                      isTodayDate ? 'border-blue-400 bg-blue-50' : 'border-gray-300'
+                                    } focus:ring-blue-400`}
+                                  />
                                 ) : (
                                   <button
                                     onClick={() => toggleHabitCompletion(habit, date)}
-                                    className={`w-6 sm:w-8 h-6 sm:h-8 rounded-full border-2 flex items-center justify-center transition-all ${
+                                    className={`w-10 h-10 rounded-lg border-2 flex items-center justify-center transition-all ${
                                       isCompleted
-                                        ? 'bg-gray-400 border-gray-400 text-white hover:bg-gray-500'
-                                        : isDateToday
-                                        ? 'border-gray-400 hover:border-gray-500 hover:bg-gray-100'
-                                        : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'
+                                        ? 'bg-green-500 border-green-500 text-white'
+                                        : isTodayDate
+                                        ? 'border-blue-400 hover:bg-blue-50'
+                                        : 'border-gray-300 hover:bg-gray-50'
                                     }`}
-                                    title={`${habit.name} - ${date.toLocaleDateString()}`}
                                   >
-                                    {isCompleted && <span className="text-xs">✓</span>}
+                                    {isCompleted && '✓'}
                                   </button>
                                 )}
                               </td>
                             );
                           })}
-                          
-                          {/* Weekly total for custom habit */}
-                          <td className="p-2 sm:p-4 text-center bg-gray-200 border-l border-gray-300 min-w-[80px]">
-                            <div className="text-xs sm:text-sm font-medium text-gray-600">
-                              {habit.type === 'number' ? (
-                                weekDates.reduce((sum, date) => {
-                                  const key = `${habit.id}-${formatDateString(date)}`;
-                                  return sum + (habitValues[key] || 0);
-                                }, 0)
-                              ) : (
-                                weekDates.reduce((sum, date) => {
-                                  const key = `${habit.id}-${formatDateString(date)}`;
-                                  return sum + (completedHabits[key] ? 1 : 0);
-                                }, 0)
-                              )}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              {habit.type === 'number' ? habit.unit : 'days'}
-                            </div>
+                          <td className="p-4 text-center bg-blue-50 font-semibold text-gray-800">
+                            {weeklyTotal}
                           </td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* Overall Summary */}
-          {habits.length === 0 && (
-            <div className="p-6 sm:p-8 text-center text-gray-500 bg-white rounded-lg border">
-              <p className="text-sm sm:text-base">No habits added yet.</p>
-              <div className="mt-4 space-y-2">
-                <p className="text-xs sm:text-sm">Get started by:</p>
-                <div className="flex flex-col sm:flex-row justify-center gap-2 sm:gap-3 text-xs sm:text-sm">
-                  <span className="text-blue-600">Adding predefined scoring habits</span>
-                  <span className="text-gray-400 hidden sm:inline">or</span>
-                  <span className="text-gray-600">Creating custom personal habits</span>
-                </div>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
 
-          {/* Week Summary - Mobile Optimized */}
-          {habits.length > 0 && (
-            <div className="summary-section mt-4 sm:mt-6 bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
-              <h3 className="font-semibold text-blue-800 mb-3 text-sm sm:text-base">📊 Week Summary & Scoring</h3>
+          {validHabits.length === 0 && (
+            <div className="text-center py-16">
+              <div className="text-6xl mb-4">🎯</div>
+              <p className="text-gray-600 font-semibold mb-6 text-lg">No habits yet</p>
+              <button 
+                onClick={() => setIsCustomHabitsModalOpen(true)}
+                className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-8 py-4 rounded-2xl font-bold hover:shadow-2xl transition active:scale-95 text-lg"
+              >
+                Create Your First Habit
+              </button>
+            </div>
+          )}
+
+          {validHabits.length > 0 && (
+            <div className="mt-8 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-3xl p-6 shadow-lg">
+              <h3 className="font-black text-blue-800 mb-4 text-xl flex items-center gap-2">
+                📊 Week Summary & Scoring
+              </h3>
               
               {scoringHabits.length > 0 && (
                 <>
-                  <h4 className="font-medium text-blue-700 mb-2 text-sm">🎯 Scoring Habits:</h4>
-                  <div className="summary-grid grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 mb-4">
+                  <h4 className="font-bold text-blue-700 mb-3 text-lg flex items-center gap-2">
+                    🎯 Scoring Habits:
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-6">
                     {scoringHabits.map(habit => {
-                      const percentage = getCompletionPercentage(habit);
+                      const progress = getHabitWeekProgress(habit);
+                      const completionPercentage = getHabitCompletionPercentage(habit);
                       const weeklyTotal = habit.type === 'number' ? 
                         weekDates.reduce((sum, date) => {
                           const key = `${habit.id}-${formatDateString(date)}`;
                           return sum + (habitValues[key] || 0);
                         }, 0) :
-                        weekDates.reduce((sum, date) => {
-                          const key = `${habit.id}-${formatDateString(date)}`;
-                          return sum + (completedHabits[key] ? 1 : 0);
-                        }, 0);
+                        progress;
                       
                       return (
-                        <div key={habit.id} className="summary-card text-center bg-white rounded-lg p-2 sm:p-3">
-                           <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                deleteCustomHabit(habit);
-                              }}
-                              className="absolute top-1 right-1 text-red-400 hover:text-red-600 transition-colors"
-                              title="Delete this habit"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" className="bi bi-x-circle" viewBox="0 0 16 16">
-                                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                                <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
-                              </svg>
-                            </button>
-                          <div className="summary-card-icon text-lg sm:text-2xl mb-1">{habit.icon}</div>
-                          <div className="summary-card-name text-xs sm:text-sm font-medium text-gray-700">{habit.name}</div>
-                          <div className={`summary-card-value text-sm sm:text-lg font-bold ${
-                            percentage >= 80 ? 'text-green-600' : 
-                            percentage >= 60 ? 'text-yellow-600' : 'text-red-600'
+                        <div key={habit.id} className="bg-white rounded-2xl p-4 text-center shadow-md border-2 border-blue-100 hover:border-blue-300 transition">
+                          <div className="text-3xl mb-2">{habit.icon}</div>
+                          <div className="text-sm font-semibold text-gray-700 mb-1">{habit.name}</div>
+                          <div className={`text-2xl font-black mb-1 ${
+                            completionPercentage >= 80 ? 'text-green-600' : 
+                            completionPercentage >= 50 ? 'text-amber-600' : 'text-red-600'
                           }`}>
                             {weeklyTotal} {habit.type === 'number' ? 'pts' : 'days'}
                           </div>
                           <div className="text-xs text-gray-500">
-                            {percentage}% completed
+                            {completionPercentage}% on track
                           </div>
                         </div>
                       );
@@ -900,77 +722,78 @@ const toggleHabitCompletion = async (habit, date) => {
                   </div>
                 </>
               )}
+
               {(() => {
-                    const appointmentsHabit = scoringHabits.find(h => h.name === 'Process Appointments');
-                    const goalProgress = appointmentsHabit ? getLeadershipGoalProgress(appointmentsHabit, habitValues) : null;
-                    
-                    if (goalProgress && goalProgress.isActive) {
-                        return (
-                          <div className="mb-4 bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-lg p-4">
-                          <h4 className="font-bold text-white mb-2 text-sm flex items-center">
-                            🎯 Leadership Promotion Goal
-                          </h4>
-                          <div className="grid grid-cols-2 gap-4 mb-3">
-                            <div className="text-center">
-                              <div className="text-2xl font-bold">{goalProgress.total}</div>
-                              <div className="text-xs opacity-90">Completed</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-2xl font-bold text-yellow-300">{goalProgress.remaining}</div>
-                              <div className="text-xs opacity-90">Remaining</div>
-                            </div>
-                          </div>
-                          <div className="mb-2">
-                            <div className="flex justify-between text-xs mb-1">
-                              <span>Progress</span>
-                              <span>{Math.round(goalProgress.progress)}%</span>
-                            </div>
-                            <div className="w-full bg-white bg-opacity-30 rounded-full h-2">
-                              <div 
-                                className="bg-yellow-300 h-2 rounded-full transition-all"
-                                style={{ width: `${goalProgress.progress}%` }}
-                              ></div>
-                            </div>
-                          </div>
-                          <div className="text-xs opacity-90 text-center">
-                            {goalProgress.daysRemaining} days remaining until December 1st
-                          </div>
-                          {goalProgress.remaining > 0 && goalProgress.daysRemaining > 0 && (
-                            <div className="text-xs text-center mt-2 bg-white bg-opacity-20 rounded px-2 py-1">
-                              Need ~{Math.ceil(goalProgress.remaining / goalProgress.daysRemaining)} per day to reach goal
-                            </div>
-                          )}
+                const appointmentsHabit = scoringHabits.find(h => h.name === 'Process Appointments');
+                const goalProgress = appointmentsHabit ? getLeadershipGoalProgress(appointmentsHabit, habitValues) : null;
+                
+                if (goalProgress && goalProgress.isActive) {
+                  return (
+                    <div className="mb-6 bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-2xl p-5 shadow-xl">
+                      <h4 className="font-black text-white mb-3 text-lg flex items-center gap-2">
+                        🎯 Leadership Promotion Goal
+                      </h4>
+                      <div className="grid grid-cols-2 gap-6 mb-4">
+                        <div className="text-center">
+                          <div className="text-4xl font-black">{goalProgress.total}</div>
+                          <div className="text-sm opacity-90 font-semibold">Completed</div>
                         </div>
-                      );
-                    }
-                    return null;
-                  })()}
+                        <div className="text-center">
+                          <div className="text-4xl font-black text-yellow-300">{goalProgress.remaining}</div>
+                          <div className="text-sm opacity-90 font-semibold">Remaining</div>
+                        </div>
+                      </div>
+                      <div className="mb-3">
+                        <div className="flex justify-between text-sm mb-2 font-semibold">
+                          <span>Progress</span>
+                          <span>{Math.round(goalProgress.progress)}%</span>
+                        </div>
+                        <div className="w-full bg-white/30 rounded-full h-3">
+                          <div 
+                            className="bg-yellow-300 h-3 rounded-full transition-all shadow-lg"
+                            style={{ width: `${goalProgress.progress}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                      <div className="text-sm opacity-90 text-center font-medium">
+                        {goalProgress.daysRemaining} days remaining until December 1st
+                      </div>
+                      {goalProgress.remaining > 0 && goalProgress.daysRemaining > 0 && (
+                        <div className="text-sm text-center mt-3 bg-white/20 rounded-xl px-4 py-2 font-semibold">
+                          Need ~{Math.ceil(goalProgress.remaining / goalProgress.daysRemaining)} per day to reach goal
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               {customHabits.length > 0 && (
                 <>
-                  <h4 className="font-medium text-gray-600 mb-2 text-sm">⭐ Custom Habits:</h4>
-                  <div className="summary-grid grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 mb-4">
+                  <h4 className="font-bold text-gray-600 mb-3 text-lg flex items-center gap-2">
+                    ⭐ Custom Habits:
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-6">
                     {customHabits.map(habit => {
-                      const percentage = getCompletionPercentage(habit);
+                      const progress = getHabitWeekProgress(habit);
+                      const completionPercentage = getHabitCompletionPercentage(habit);
                       const weeklyTotal = habit.type === 'number' ? 
                         weekDates.reduce((sum, date) => {
                           const key = `${habit.id}-${formatDateString(date)}`;
                           return sum + (habitValues[key] || 0);
                         }, 0) :
-                        weekDates.reduce((sum, date) => {
-                          const key = `${habit.id}-${formatDateString(date)}`;
-                          return sum + (completedHabits[key] ? 1 : 0);
-                        }, 0);
+                        progress;
                       
                       return (
-                        <div key={habit.id} className="summary-card text-center bg-gray-100 rounded-lg p-2 sm:p-3">
-                          <div className="summary-card-icon text-lg sm:text-2xl mb-1 opacity-70">{habit.icon}</div>
-                          <div className="summary-card-name text-xs sm:text-sm font-medium text-gray-600">{habit.name}</div>
-                          <div className="summary-card-value text-sm sm:text-lg font-bold text-gray-600">
+                        <div key={habit.id} className="bg-gray-100 rounded-2xl p-4 text-center shadow-md border-2 border-gray-200">
+                          <div className="text-3xl mb-2 opacity-70">{habit.icon}</div>
+                          <div className="text-sm font-semibold text-gray-600 mb-1">{habit.name}</div>
+                          <div className="text-2xl font-black text-gray-600 mb-1">
                             {weeklyTotal} {habit.type === 'number' ? habit.unit : 'days'}
                           </div>
                           <div className="text-xs text-gray-500">
-                            {percentage}% completed
+                            {completionPercentage}% on track
                           </div>
                         </div>
                       );
@@ -979,30 +802,32 @@ const toggleHabitCompletion = async (habit, date) => {
                 </>
               )}
               
-              {/* Scoring Legend */}
-              <div className="bg-white rounded-lg p-3 border-l-4 border-blue-500">
-                <h4 className="font-semibold text-blue-800 mb-2 text-sm">🎯 How Scoring Works:</h4>
-                <div className="text-xs sm:text-sm text-blue-700 space-y-1">
-                  <div><strong>Scoring Habits:</strong> Count toward your daily/weekly points</div>
-                  <div><strong>Custom Habits:</strong> Personal tracking only (no points)</div>
-                  <div><strong>Checkmarks:</strong> 1 point per completion</div>
-                  <div><strong>Numbers:</strong> Actual number entered (appointments, contacts, etc.)</div>
+              <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-500 shadow-md">
+                <h4 className="font-black text-blue-800 mb-3 text-lg">🎯 How Scoring Works:</h4>
+                <div className="text-sm text-blue-700 space-y-2 font-medium">
+                  <div className="flex items-start gap-2">
+                    <span className="text-blue-500">•</span>
+                    <span><strong>Scoring Habits:</strong> Count toward your daily/weekly points</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-gray-400">•</span>
+                    <span><strong>Custom Habits:</strong> Personal tracking only (no points)</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-green-500">•</span>
+                    <span><strong>Checkmarks:</strong> 1 point per completion</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-purple-500">•</span>
+                    <span><strong>Numbers:</strong> Actual number entered (appointments, contacts, etc.)</span>
+                  </div>
                 </div>
-              </div>            
+              </div>
             </div>
           )}
-
-          {/* Week Structure Info */}
-          <div className="mt-4 text-center text-xs sm:text-sm text-gray-500">
-            <p>📅 Your week runs from <strong>Saturday to Friday</strong></p>
-            <p className="mt-1">
-              {isCurrentWeek(currentWeek) ? `Current week: ${weekRange}` : `Viewing: ${weekRange}`}
-            </p>
-          </div>
-        </>
+        </div>
       )}
 
-      {/* Custom Habits Modal */}
       <CustomHabitsModal
         isOpen={isCustomHabitsModalOpen}
         onClose={() => setIsCustomHabitsModalOpen(false)}
@@ -1012,13 +837,44 @@ const toggleHabitCompletion = async (habit, date) => {
         }}
       />
 
-      {/* Click outside to close week picker */}
-      {showWeekPicker && (
-        <div
-          className="fixed inset-0 z-5"
-          onClick={() => setShowWeekPicker(false)}
-        />
-      )}
+      <style jsx>{`
+        .scrollbar-hide::-webkit-scrollbar {
+          display: none;
+        }
+        .scrollbar-hide {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+        .snap-x {
+          scroll-snap-type: x mandatory;
+        }
+        .snap-mandatory > * {
+          scroll-snap-align: start;
+        }
+        
+        @media (min-width: 1024px) {
+          .scrollbar-hide::-webkit-scrollbar {
+            display: block;
+            height: 10px;
+          }
+          .scrollbar-hide::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+          }
+          .scrollbar-hide::-webkit-scrollbar-thumb {
+            background: rgba(139, 92, 246, 0.6);
+            border-radius: 10px;
+          }
+          .scrollbar-hide::-webkit-scrollbar-thumb:hover {
+            background: rgba(139, 92, 246, 0.8);
+          }
+          .scrollbar-hide {
+            -ms-overflow-style: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(139, 92, 246, 0.6) rgba(255, 255, 255, 0.3);
+          }
+        }
+      `}</style>
     </div>
   );
 };

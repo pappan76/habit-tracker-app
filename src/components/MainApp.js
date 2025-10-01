@@ -6,6 +6,8 @@ import GamePlanningApp from './GamePlanningApp';
 import InventoryPage from './InventoryPage'; // New InventoryPage component
 import Leaderboard from './Leaderboard';
 import BudgetExpensesTracker from './BudgetExpensesTracker'; // New BudgetExpensesTracker component
+import AnnouncementDisplay from './AnnouncementDisplay';
+import AnnouncementAdmin from './AnnouncementAdmin';
 
 
 const MainApp = ({ user }) => {
@@ -32,6 +34,29 @@ const MainApp = ({ user }) => {
               >
                 Habits
               </button>
+               <button
+                onClick={() => setCurrentView('announcements')}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  currentView === 'announcements'
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                }`}
+              >
+                Announcements
+              </button>
+              {/* Add admin-only announcement management */}
+              {isAdmin && (
+                <button
+                  onClick={() => setCurrentView('announcement-admin')}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    currentView === 'announcement-admin'
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                  }`}
+                >
+                  Manage Announcements
+                </button>
+              )}
               <button
                 onClick={() => setCurrentView('contacts')}
                 className={`px-3 sm:px-4 py-2 rounded-lg font-medium transition-colors text-sm ${
@@ -88,13 +113,18 @@ const MainApp = ({ user }) => {
       {/* Main Content */}
       <main className="py-6">
         {currentView === 'habits' && <HabitList />}
+        {currentView === 'announcements' && <AnnouncementDisplay user={user} />}
+        {currentView === 'announcement-admin' && isAdmin && <AnnouncementAdmin user={user} />}
         {currentView === 'contacts' && <ContactManagementPage user={user} />}
         {currentView === 'audio' && (
           <>
             <AudioHabitCard />
-            <WeeklyFeaturedAudios />
+            <div style={{ border: '2px solid red', padding: '10px', margin: '10px 0' }}>
+              <h2>Weekly Featured Audios Should Appear Here</h2>
+              <WeeklyFeaturedAudios />
+            </div>
           </>
-        )}        
+        )}
         {currentView === 'gamePlanning' && <GamePlanningApp />}
         <button
           onClick={() => setCurrentView('inventory')}
