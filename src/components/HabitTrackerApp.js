@@ -17,6 +17,7 @@ import AnnouncementBadge from './AnnouncementBadge';
 import AnnouncementDisplay from './AnnouncementDisplay';
 import AnnouncementAdmin from './AnnouncementAdmin';
 import { Menu, X, Home, Bell, Target, Phone, Mic, DollarSign, Trophy, Settings, LogOut, ChevronLeft, ChevronRight } from 'lucide-react';
+import { testGeminiConnection } from '../services/aiService'; // Add this import
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -94,7 +95,8 @@ const HabitTrackerApp = () => {
       setLoading(false);
     }
   }, [user]);
-
+  
+    
   useEffect(() => {
     if (user) {
       loadUserHabits();
@@ -435,6 +437,7 @@ const HabitTrackerApp = () => {
                 <WeeklyHabitTracker 
                   habits={userHabits} 
                   onRefreshHabits={loadUserHabits}
+                  onNavigateToAddHabits={() => setCurrentView('addHabits')}
                 />
               </div>
             </div>

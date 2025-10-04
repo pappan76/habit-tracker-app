@@ -1,5 +1,6 @@
+// services/firebase.js
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -12,26 +13,6 @@ const firebaseConfig = {
   measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID
 };
 
-// Validate config
-if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-  throw new Error('Firebase configuration is missing. Check your environment variables.');
-}
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-
-// Initialize services first
+export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
 export const db = getFirestore(app);
-
-// Set persistence after auth is initialized
-setPersistence(auth, browserLocalPersistence)
-  .then(() => {
-    console.log('Persistence set to LOCAL');
-  })
-  .catch((error) => {
-    console.error('Error setting persistence:', error);
-  });
-
-export default app;

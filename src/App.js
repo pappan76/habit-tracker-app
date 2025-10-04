@@ -7,10 +7,16 @@ import './styles/responsive.css';
 import './styles/mobile.css';
 import { updateHabitNames } from './utils/updateHabits';
 import InventoryPage from './components/InventoryPage';
+import { testGeminiConnection } from './services/aiService';
 
 
 function App() {
   const { user, userProfile, loading } = useAuth();
+  useEffect(() => {
+    // Test Gemini connection on app startup
+    console.log('🔍 Testing Gemini API connection...');
+    testGeminiConnection();
+  }, []);
 
   // Run migration when user is authenticated
   useEffect(() => {
